@@ -25,3 +25,7 @@ generate.py             # sampling (temperature, top-k, top-p, repetition penalt
 chat.py                 # console chat wrapper
 main.py                 # CUDA/GPU check
 ```
+
+## License
+
+тип моей лицензии — see [LICENSE](./LICENSE).
