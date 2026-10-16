@@ -28,4 +28,4 @@ main.py                 # CUDA/GPU check
 
 ## License
 
-тип моей лицензии — see [LICENSE](./LICENSE).
+Apache License 2.0 — see [LICENSE](./LICENSE).
