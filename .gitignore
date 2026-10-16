@@ -17,3 +17,5 @@ data/
 
 .env
 kaggle.json
+
+.secrets/
