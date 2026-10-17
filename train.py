@@ -372,6 +372,13 @@ def worker(rank, world_size, args, model_cfg, phase):
                 stop_reason = f"сессия достигла лимита {args.session_hours} ч"
             break
 
+        # LR задаём ДО шага оптимизатора, а не после: иначе первая итерация
+        # обучения шла бы с peak_lr из конструктора AdamW (для main-пресета
+        # ~6e-4 вместо warmup ~6e-7), а вся кривая расписания была бы сдвинута
+        # на один шаг вперёд.
+        lr = lr_at(phase_tokens)
+        _set_lr(optimizer, lr)
+
         loss_accum = 0.0
         grad_norm = torch.tensor(0.0)
         for micro in range(phase.grad_accum):
@@ -404,8 +411,6 @@ def worker(rank, world_size, args, model_cfg, phase):
         step += 1
         tokens_seen += tokens_per_step
         phase_tokens += tokens_per_step
-        lr = lr_at(phase_tokens)
-        _set_lr(optimizer, lr)
         loss_window.append(loss_accum / phase.grad_accum)
 
         if step % args.log_every == 0:

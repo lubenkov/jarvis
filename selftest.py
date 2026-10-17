@@ -37,6 +37,13 @@ def run(cmd, cwd):
 def build_corpus(corpus_dir, rng):
     os.makedirs(corpus_dir, exist_ok=True)
 
+    # Размеры корпуса подобраны с большим запасом: после резервирования валидации
+    # (--val-skip 2000 + --val-tokens 6000 токенов на источник, см. шаг 3 ниже)
+    # в train-сплите КАЖДОГО источника обязан остаться шард длиннее окна dev-пресета
+    # (context_length + 2 = 514 токенов) — иначе dataset.py честно упадёт с
+    # «Все шарды источника короче окна». При 300/150/220 документах в train оставалось
+    # 64 (chat) и 161 (texts) токена, и селфтест детерминированно падал на претрейне.
+
     def sentence(n):
         return " ".join(rng.choice(WORDS) for _ in range(n)).capitalize() + "."
 
@@ -44,13 +51,13 @@ def build_corpus(corpus_dir, rng):
         return " ".join(sentence(rng.randint(5, 12)) for _ in range(rng.randint(3, 8)))
 
     with open(os.path.join(corpus_dir, "web_ru.jsonl"), "w", encoding="utf-8") as f:
-        for _ in range(300):
+        for _ in range(1500):
             f.write(json.dumps({"text": paragraph()}, ensure_ascii=False) + "\n")
     with open(os.path.join(corpus_dir, "texts_ru.jsonl"), "w", encoding="utf-8") as f:
-        for _ in range(150):
+        for _ in range(900):
             f.write(json.dumps({"text": paragraph()}, ensure_ascii=False) + "\n")
     with open(os.path.join(corpus_dir, "chat_ru.jsonl"), "w", encoding="utf-8") as f:
-        for _ in range(220):
+        for _ in range(2200):
             messages = []
             for _ in range(rng.randint(1, 3)):
                 messages.append({"role": "user", "content": sentence(rng.randint(3, 8))})
