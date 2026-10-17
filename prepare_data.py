@@ -21,8 +21,6 @@ import shutil
 from chat_format import prepare_messages
 from model.config import CORPUS_DIR
 
-os.environ["HF_HOME"] = "D:/BS/huggingface_cache"
-
 MIN_CHARS = 40
 MAX_CHARS = 20000
 MAX_TURNS = 24
