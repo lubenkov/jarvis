@@ -16,9 +16,12 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 
 from chat_format import prepare_messages
 from model.config import CORPUS_DIR
+
+os.environ["HF_HOME"] = "D:/BS/huggingface_cache"
 
 MIN_CHARS = 40
 MAX_CHARS = 20000
@@ -28,6 +31,9 @@ MIN_CYRILLIC_RATIO = 0.5
 LIST_KEYS = ("messages", "conversation", "conversations", "dialog", "dialogue", "dialogues", "chats")
 PAIR_KEYS = (("instruction", "output"), ("question", "answer"), ("prompt", "response"),
              ("query", "answer"), ("input", "output"))
+
+WEB_REPO = "HuggingFaceFW/fineweb-2"
+WEB_BATCH_DOCS = 2048
 
 
 def cyrillic_ratio(text):
@@ -130,37 +136,122 @@ def _write_conversation(f, messages, seen_hashes, stats):
     return True
 
 
+def _web_shards():
+    """Parquet-шарды fineweb-2 rus_Cyrl/train в стабильном (лексикографическом) порядке."""
+    from huggingface_hub import HfApi
+
+    files = [(f.path, f.size or 0)
+             for f in HfApi().list_repo_tree(WEB_REPO, path_in_repo="data/rus_Cyrl/train",
+                                             repo_type="dataset")
+             if f.path.endswith(".parquet")]
+    files.sort(key=lambda item: item[0])
+    return files
+
+
+def _open_web_corpus(building_path, stats):
+    """Открывает частичный корпус на дозапись и восстанавливает seen_hashes.
+
+    Корпус пишется в отдельный .building и переименовывается в готовый файл только
+    в самом конце: обрыв процесса не портит ни прошлый готовый корпус, ни уже
+    записанные строки. Недописанный хвост (если процесс убили во время f.write)
+    обрезается, хэши восстановленных строк снова участвуют в дедупликации.
+    """
+    if not os.path.exists(building_path):
+        return open(building_path, "w", encoding="utf-8"), set()
+
+    print(f"  найден частичный корпус ({os.path.getsize(building_path) / 1e9:.1f} ГБ) — восстанавливаю хэши")
+    seen_hashes = set()
+    good_bytes = 0
+    with open(building_path, "rb") as f:
+        for raw in f:
+            if not raw.endswith(b"\n"):
+                break
+            try:
+                text = json.loads(raw)["text"]
+            except (json.JSONDecodeError, UnicodeDecodeError, KeyError, TypeError):
+                break
+            seen_hashes.add(hashlib.md5(text[:2000].encode("utf-8")).hexdigest())
+            good_bytes += len(raw)
+            stats["written"] += 1
+    if good_bytes != os.path.getsize(building_path):
+        os.truncate(building_path, good_bytes)
+    return open(building_path, "a", encoding="utf-8"), seen_hashes
+
+
 def build_web(out_path, max_docs, dry_run=False):
-    from datasets import load_dataset
+    """fineweb-2 rus_Cyrl -> web_ru.jsonl, шард за шардом.
+
+    Почему не load_dataset(..., streaming=True): на длинных прогонах у него течёт
+    RSS — Python-обёртки файлов между fsspec и pyarrow накапливаются на каждое
+    чтение (huggingface/datasets#7269), а у шарда fineweb-2 1815 row groups по 1000
+    строк — тысячи чтений. На 16 ГБ ОЗУ это MemoryError после ~700k документов.
+    Здесь шард качается целиком во временный каталог (hf_hub_download умеет
+    докачивать недоскачанное) и читается локально нативным pyarrow батчами по
+    WEB_BATCH_DOCS: память ограничена одним батчем.
+
+    Прерывание не теряет прогресс: частичный корпус лежит в {out_path}.building
+    (при перезапуске продолжается с него), скачанный шард удаляется только после
+    полной обработки.
+    """
+    import pyarrow.parquet as pq
+    from huggingface_hub import hf_hub_download
 
     stats = {"read": 0, "written": 0, "filtered": 0}
-    seen_hashes = set()
-    dataset = load_dataset("HuggingFaceFW/fineweb-2", name="rus_Cyrl", split="train", streaming=True)
-    dataset = dataset.shuffle(seed=42, buffer_size=10_000)
     limit = 100 if dry_run else max_docs
+    building_path = out_path + ".building"
+    shard_dir = out_path + ".parts"
 
-    with open(out_path, "w", encoding="utf-8") as f:
-        for ex in dataset:
-            stats["read"] += 1
-            text = (ex.get("text") or "").strip()
-            if not (400 <= len(text) <= MAX_CHARS):
-                stats["filtered"] += 1
-                continue
-            if cyrillic_ratio(text) < 0.6:
-                stats["filtered"] += 1
-                continue
-            digest = hashlib.md5(text[:2000].encode("utf-8")).hexdigest()
-            if digest in seen_hashes:
-                stats["filtered"] += 1
-                continue
-            seen_hashes.add(digest)
-
-            f.write(json.dumps({"text": text}, ensure_ascii=False) + "\n")
-            stats["written"] += 1
-            if stats["written"] % 50000 == 0:
-                print(f"  ... записано {stats['written']} документов")
+    files = _web_shards()
+    print(f"  шардов в датасете: {len(files)}, читаю с первого")
+    os.makedirs(shard_dir, exist_ok=True)
+    f, seen_hashes = _open_web_corpus(building_path, stats)
+    try:
+        for idx, (name, size) in enumerate(files, start=1):
             if stats["written"] >= limit:
                 break
+            print(f"  шард {idx}/{len(files)}: {os.path.basename(name)} ({size / 1e9:.1f} ГБ)")
+            try:
+                local_path = hf_hub_download(WEB_REPO, name, repo_type="dataset",
+                                             local_dir=shard_dir)
+                parquet_file = pq.ParquetFile(local_path)
+                stop = False
+                for batch in parquet_file.iter_batches(batch_size=WEB_BATCH_DOCS,
+                                                       columns=["text"]):
+                    for text in batch.column("text").to_pylist():
+                        stats["read"] += 1
+                        text = (text or "").strip()
+                        if not (400 <= len(text) <= MAX_CHARS):
+                            stats["filtered"] += 1
+                            continue
+                        if cyrillic_ratio(text) < 0.6:
+                            stats["filtered"] += 1
+                            continue
+                        digest = hashlib.md5(text[:2000].encode("utf-8")).hexdigest()
+                        if digest in seen_hashes:
+                            stats["filtered"] += 1
+                            continue
+                        seen_hashes.add(digest)
+
+                        f.write(json.dumps({"text": text}, ensure_ascii=False) + "\n")
+                        stats["written"] += 1
+                        if stats["written"] % 50000 == 0:
+                            print(f"  ... записано {stats['written']} документов")
+                        if stats["written"] >= limit:
+                            stop = True
+                            break
+                    if stop:
+                        break
+                parquet_file.close()
+                os.remove(local_path)  # шард прочитан целиком — диск не копим
+                print(f"  ... шард обработан: прочитано {stats['read']}, записано {stats['written']}")
+                f.flush()
+            except Exception as error:
+                print(f"  ! шард {name} не обработан: {type(error).__name__}: {error}")
+    finally:
+        f.close()
+
+    os.replace(building_path, out_path)
+    shutil.rmtree(shard_dir, ignore_errors=True)
     return stats
 
 
