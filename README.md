@@ -18,9 +18,14 @@
 Два этапа обучения:
 
 1. **pretrain** — обычное языковое моделирование на смеси веб-текста и диалогов
-   (веб ~50%, чаты ~45%, новости/статьи ~5%), цель ~2.6B токенов;
+   (веб ~68%, чаты ~27%, новости/статьи ~5%), цель ~1.2B токенов;
 2. **SFT** — дожим на диалогах: лосс считается **только на ответах ассистента**
-   (токены пользователя маскируются), цель ~0.3B токенов.
+   (токены пользователя маскируются), цель ~0.15B токенов.
+
+Объём подобран под собранный корпус (~1B токенов: веб 807M, чаты 110M, новости
+67M). При таких весах получается примерно один проход по вебу, три по диалогам и
+один по новостям. Диалогов в корпусе мало, поэтому большие веса на чаты (как было
+раньше) означали бы зазубривание конкретных диалогов, а не обучение.
 
 Формат диалога (одинаковый при обучении и генерации):
 
@@ -44,7 +49,7 @@ python main.py
 python selftest.py
 
 # 3) чат с обученной моделью
-python chat.py --ckpt checkpoints/main/inference.pt
+python chat.py --ckpt checkpoints/pretrain/inference.pt
 ```
 
 `selftest.py` прогоняет весь путь: мини-корпус → токенизатор → шарды →
@@ -55,16 +60,22 @@ python chat.py --ckpt checkpoints/main/inference.pt
 
 Нужны 2 сессии: **CPU** (подготовка данных, интернет включён) и **GPU T4×2** (обучение).
 
+Рабочая ветка — `develop` (на GitHub веткой по умолчанию остался устаревший
+`master`), поэтому клонируй явно: `git clone -b develop ...`.
+
+В актуальных сессиях Kaggle датасеты монтируются в `/kaggle/input/datasets/<ник>/<слаг>/`,
+поэтому в командах ниже ник заменён на `*` — так пути не зависят от имени аккаунта.
+
 ### Сессия 1 (CPU + Internet): корпус и токенизатор
 
 ```bash
-git clone https://github.com/lubenkov/jarvis.git && cd jarvis
+git clone -b develop https://github.com/lubenkov/jarvis.git && cd jarvis
 pip install -q -r requirements.txt
 
 # схемы датасетов на месте?
 python prepare_data.py --what all --dry-run
 
-# веб-текст (~1.2B токенов, 2-4 часа), новости, диалоги
+# веб-текст (~0.8B токенов, 2-4 часа), новости, диалоги
 python prepare_data.py --what web  --max-web-docs 1000000
 python prepare_data.py --what texts --max-texts-docs 150000
 python prepare_data.py --what chats
@@ -85,26 +96,47 @@ python dataset.py
 Теперь сохрани результат (**Save Version** → output как Kaggle Dataset
 `jarvis-corpus`): нужны `tokenizer.json` и папка `data/tokenized/`.
 
+> Веб-загрузчик датасетов не принимает папку целиком, зато Kaggle сам распаковывает
+> ZIP. Собери архив, в корне которого лежат `tokenizer.json` и папка `tokenized/`:
+
+```powershell
+Compress-Archive -Path tokenizer.json, data\tokenized -DestinationPath jarvis-corpus.zip
+```
+
 ### Сессия 2 (GPU T4×2): pretrain
 
 Добавь к ноутбуку два Input Dataset: `jarvis-corpus` и (после первой сессии) `jarvis-checkpoints`.
 
 ```bash
-git clone https://github.com/lubenkov/jarvis.git && cd jarvis
+git clone -b develop https://github.com/lubenkov/jarvis.git && cd jarvis
 pip install -q -r requirements.txt
-cp -r /kaggle/input/jarvis-corpus/tokenizer.json .
-mkdir -p data && cp -r /kaggle/input/jarvis-corpus/tokenized data/
+
+mkdir -p data
+cp -r /kaggle/input/datasets/*/jarvis-corpus/tokenized data/
+cp /kaggle/input/datasets/*/jarvis-corpus/tokenizer.json .
 
 mkdir -p checkpoints
-cp -r /kaggle/input/jarvis-checkpoints/* checkpoints/ 2>/dev/null || true
+cp -r /kaggle/input/datasets/*/jarvis-checkpoints/* checkpoints/ 2>/dev/null || true
+
+# контроль: в train должно быть ~1B токенов по трём источникам
+python dataset.py
+
+# дым-тест: 10M токенов, ~136 шагов, минут десять — ловит ошибки до длинного прогона
+python train.py --preset main --phase pretrain --max-tokens 10000000 \
+    --session-hours 0.7 --micro-batch 16 --grad-accum 3 --sample-every 20
 
 # сессия до 11 часов, потом мягкая остановка с полным чекпоинтом
-python train.py --preset main --phase pretrain --session-hours 11
+python train.py --preset main --phase pretrain --session-hours 11 \
+    --micro-batch 16 --grad-accum 3
 ```
+
+> `--micro-batch 16 --grad-accum 3` — те же 73 728 токенов на шаг, что и дефолтные
+> 24×2, но с запасом по памяти на 16 ГБ T4. Точность выбирается автоматически:
+> fp16 на Turing/Volta, bf16 на Ampere+ (принудительно — `--dtype`).
 
 Чекпоинты складываются в `checkpoints/pretrain/`:
 
-- `latest.pt` — полный чекпоинт (модель + оптимизатор + счётчики) для продолжения;
+- `latest.pt` — полный чекпоинт (модель + оптимизатор + счётчики) для продолжения, ~1.4 ГБ;
 - `ckpt_XXXXXXXX.pt` — последние два шага на всякий случай;
 - `best.pt` — лучший по валидации;
 - `inference.pt` — компактная fp16-копия весов для чата (~220 МБ);
@@ -115,10 +147,14 @@ python train.py --preset main --phase pretrain --session-hours 11
 `checkpoints/` и запусти ту же команду — обучение продолжится с того же шага
 (`--resume auto` по умолчанию; `--resume none` — начать заново).
 
+Претрейн 1.2B токенов при ~24k ток/с на 2×T4 — это около 14 часов, то есть две
+сессии по 11 ч: первая мягко остановится на ~0.95B, вторая добьёт остаток и сама
+завершит этап.
+
 ### Сессия 3 (GPU T4×2): SFT
 
 ```bash
-cp -r /kaggle/input/jarvis-checkpoints/pretrain checkpoints/   # или как удобно
+cp -r /kaggle/input/datasets/*/jarvis-checkpoints/pretrain checkpoints/
 python train.py --preset main --phase sft \
     --resume checkpoints/pretrain/latest.pt \
     --out-dir checkpoints/sft
@@ -149,7 +185,8 @@ python chat.py --ckpt checkpoints/pretrain/inference.pt
 - `loss`/`ppl` на претрейне должны ровно падать (первые часы — быстро, дальше медленнее);
 - `[валидация]` — ppl по каждому источнику (web/chat): если train падает, а val растёт — переобучение
   (для нашего объёма данных случается редко);
-- `samples/step_*.txt` — самое честное: сравнивай ответы на одни и те же промпты между шагами;
+- `samples/step_*.txt` — самое честное: сравнивай ответы на одни и те же промпты между шагами
+  (первый снимок пишется в начале каждой сессии, а не через тысячи шагов);
 - `tokens_per_sec` — если сильно ниже ~8k ток/с на 2×T4, проверь, что GPU не греется в throttle;
   при необходимости уменьши `--micro-batch`.
 
@@ -180,7 +217,10 @@ main.py                 # проверка окружения
 
 - **`ValueError: В tokenizer.json нет спецтокенов...`** — пересобери токенизатор:
   `python train_tokenizer.py` (готовый файл из репозитория проверку проходит);
-- **CUDA out of memory** — уменьши батч: `--micro-batch 16` (или 12);
+- **CUDA out of memory** — уменьши батч и добери накоплением, чтобы токенов на шаг
+  осталось столько же: `--micro-batch 12 --grad-accum 4`;
+- **странно медленно или `dtype: bf16` на T4** — точность подбирается автоматически
+  (fp16 на Turing/Volta, bf16 на Ampere+); принудительно: `--dtype fp16`;
 - **обучение зависло на инициализации DDP** — попробуй `NCCL_P2P_DISABLE=1 python train.py ...`
   или `--no-ddp` (будет одна GPU);
 - **скорость сильно ниже ожидаемой** — проверь, что python-процесс видит обе GPU
@@ -190,12 +230,14 @@ main.py                 # проверка окружения
 
 ## Ограничения
 
-- ~112M параметров и ~3B токенов — это уровень «приятный собеседник на бытовые темы»:
+- ~112M параметров и ~1.35B токенов (1.2B претрейн + 0.15B SFT) — это уровень
+  «приятный собеседник на бытовые темы»:
   модель отвечает связно и поддерживает разговор, но плохо знает факты, путается в
   математике и коде, может выдумывать детали;
 - максимальная длина ответа и контекста ограничена (`context_length=768`);
 - качество напрямую зависит от объёма прогонов: каждый дополнительный миллиард
-  токенов заметно улучшает связность.
+  токенов заметно улучшает связность, но упирается в объём корпуса (сейчас ~1B
+  токенов, дальше придётся докачивать данные).
 
 ## License
 
