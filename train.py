@@ -190,7 +190,11 @@ def worker(rank, world_size, args, model_cfg, phase):
          {"params": no_decay, "weight_decay": 0.0}],
         lr=phase.peak_lr, betas=(0.9, 0.95), eps=1e-8)
 
-    use_fp16 = use_cuda and not torch.cuda.is_bf16_supported()
+    # is_bf16_supported() по умолчанию учитывает и эмуляцию: на Turing/Volta (T4)
+    # она вернёт True, и обучение уйдёт на эмулированный bf16 — а это медленные
+    # ядра внимания и лишние гигабайты памяти (на T4 такой прогон падает с OOM).
+    # Спрашиваем строго про аппаратную поддержку.
+    use_fp16 = use_cuda and not torch.cuda.is_bf16_supported(including_emulation=False)
     amp_dtype = torch.float16 if use_fp16 else torch.bfloat16
     scaler = _make_scaler(use_fp16)
 
