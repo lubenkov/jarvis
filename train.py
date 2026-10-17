@@ -13,6 +13,9 @@
 Особенности под Kaggle: обучение идёт сессиями, каждая сессия мягко останавливается
 по времени (--session-hours) и сохраняет ПОЛНЫЙ чекпоинт (модель + оптимизатор +
 scaler + счётчики), поэтому между сессиями ничего не теряется.
+
+Точность AMP выбирается автоматически: fp16 на Turing/Volta (T4), bf16 на Ampere+.
+Принудительно — флагом --dtype.
 """
 
 import argparse
@@ -82,6 +85,24 @@ def _set_lr(optimizer, lr):
         group["lr"] = lr
 
 
+def _resolve_amp(pref, use_cuda):
+    """Точность AMP: (use_fp16, amp_dtype).
+
+    auto — bf16 только там, где он аппаратный (Ampere/Ada/Hopper+); на Turing и
+    Volta (T4) берём fp16: тамошний bf16 существует лишь эмуляцией, а это
+    медленные ядра внимания и заметно больший расход памяти (на T4 — OOM).
+    """
+    if not use_cuda:
+        return False, torch.float32
+    if pref == "fp16":
+        return True, torch.float16
+    if pref == "bf16":
+        return False, torch.bfloat16
+    if torch.cuda.is_bf16_supported(including_emulation=False):
+        return False, torch.bfloat16
+    return True, torch.float16
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--preset", choices=list(MODEL_PRESETS), default="main")
@@ -97,6 +118,8 @@ def parse_args():
     parser.add_argument("--num-workers", type=int, default=NUM_WORKERS)
     parser.add_argument("--resume", default="auto", help="auto | none | путь к .pt")
     parser.add_argument("--no-ddp", action="store_true", help="использовать только одну GPU")
+    parser.add_argument("--dtype", choices=["auto", "fp16", "bf16"], default="auto",
+                        help="точность AMP; auto = fp16 на Turing/Volta, bf16 на Ampere+")
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--ckpt-minutes", type=float, default=CKPT_MINUTES)
     parser.add_argument("--val-every", type=int, default=VAL_EVERY_STEPS)
@@ -198,12 +221,8 @@ def worker(rank, world_size, args, model_cfg, phase):
          {"params": no_decay, "weight_decay": 0.0}],
         lr=phase.peak_lr, betas=(0.9, 0.95), eps=1e-8)
 
-    # is_bf16_supported() по умолчанию учитывает и эмуляцию: на Turing/Volta (T4)
-    # она вернёт True, и обучение уйдёт на эмулированный bf16 — а это медленные
-    # ядра внимания и лишние гигабайты памяти (на T4 такой прогон падает с OOM).
-    # Спрашиваем строго про аппаратную поддержку.
-    use_fp16 = use_cuda and not torch.cuda.is_bf16_supported(including_emulation=False)
-    amp_dtype = torch.float16 if use_fp16 else torch.bfloat16
+    # точность AMP: auto = fp16 на T4, bf16 на Ampere+ (см. _resolve_amp)
+    use_fp16, amp_dtype = _resolve_amp(args.dtype, use_cuda)
     scaler = _make_scaler(use_fp16)
 
     step, tokens_seen, phase_tokens, total_seconds = 0, 0, 0, 0.0
@@ -267,8 +286,9 @@ def worker(rank, world_size, args, model_cfg, phase):
 
     if is_main:
         planned_steps = max(1, math.ceil((phase.total_tokens - phase_tokens) / tokens_per_step))
+        dtype_name = "fp32" if not use_cuda else ("fp16" if use_fp16 else "bf16")
         print(f"Токенов на шаг: {tokens_per_step:,} | шагов в плане: ~{planned_steps:,} | "
-              f"устройств: {world_size} | dtype: {'fp16' if use_fp16 else (amp_dtype if use_cuda else 'fp32')}")
+              f"устройств: {world_size} | dtype: {dtype_name}")
 
     def barrier():
         if world_size > 1:
