@@ -1,7 +1,7 @@
 """Консольный чат с моделью. Диалог ведётся в том же формате, что и при обучении.
 
 Пример:
-    python chat.py --ckpt checkpoints/main/inference.pt
+    python chat.py --ckpt checkpoints/pretrain/inference.pt
 """
 
 import argparse
@@ -19,7 +19,7 @@ MAX_HISTORY_MESSAGES = 16
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ckpt", default="checkpoints/main/inference.pt")
+    parser.add_argument("--ckpt", default="checkpoints/pretrain/inference.pt")
     parser.add_argument("--tokenizer", default=TOKENIZER_PATH)
     parser.add_argument("--device", default=None)
     parser.add_argument("--temperature", type=float, default=TEMPERATURE)

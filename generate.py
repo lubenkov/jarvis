@@ -4,7 +4,7 @@ KV-кэш — главная оптимизация инференса: без �
 полного пересчёта по всему контексту (O(n^2)), с ним — O(1) по прошлым токенам.
 
 Пример:
-    python generate.py --ckpt checkpoints/main/inference.pt --prompt "Привет!"
+    python generate.py --ckpt checkpoints/pretrain/inference.pt --prompt "Привет!"
 """
 
 import argparse
@@ -93,7 +93,7 @@ def generate_ids(model, ids, max_new_tokens=MAX_NEW_TOKENS, temperature=TEMPERAT
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ckpt", default="checkpoints/main/inference.pt")
+    parser.add_argument("--ckpt", default="checkpoints/pretrain/inference.pt")
     parser.add_argument("--tokenizer", default=TOKENIZER_PATH)
     parser.add_argument("--prompt", default="Привет! Как дела?")
     parser.add_argument("--max-new", type=int, default=MAX_NEW_TOKENS)
