@@ -18,6 +18,7 @@ scaler + счётчики), поэтому между сессиями ниче�
 import argparse
 import contextlib
 import glob
+import inspect
 import json
 import math
 import os
@@ -45,6 +46,9 @@ from model.transformer import TransformerLM
 
 _STOP = False
 VAL_BATCH = 8
+# device_id в init_process_group появился только в torch 2.6: подставляем его
+# условно, чтобы проект не терял совместимость со старыми torch
+_PG_HAS_DEVICE_ID = "device_id" in inspect.signature(dist.init_process_group).parameters
 
 
 def _on_signal(signum, _frame):
@@ -122,6 +126,9 @@ def resolve_resume(args):
 
 
 def main():
+    # страховка от фрагментации памяти: без неё к концу длинной сессии
+    # аллокатор чаще падает с OOM. Значение можно переопределить до запуска.
+    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     args = parse_args()
     model_cfg = MODEL_PRESETS[args.preset]
     phase = PHASES[args.phase]
@@ -148,10 +155,11 @@ def main():
 def worker(rank, world_size, args, model_cfg, phase):
     global _STOP
     use_cuda = torch.cuda.is_available()
-    if world_size > 1:
-        dist.init_process_group("nccl", rank=rank, world_size=world_size)
-        torch.cuda.set_device(rank)
     device = torch.device(f"cuda:{rank}" if use_cuda else "cpu")
+    if world_size > 1:
+        torch.cuda.set_device(rank)
+        extra = {"device_id": device} if _PG_HAS_DEVICE_ID else {}
+        dist.init_process_group("nccl", rank=rank, world_size=world_size, **extra)
     is_main = rank == 0
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
