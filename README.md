@@ -79,8 +79,8 @@ python tokenize_corpus.py --source all
 python dataset.py
 ```
 
-> Важно: старый `tokenizer.json` из репозитория не содержит спецтокенов ролей и
-> не подойдёт — `train_tokenizer.py` создаст новый (порядка 1 МБ).
+> Готовый `tokenizer.json` (16k, со спецтокенами ролей, ~1.6 МБ) уже лежит в репозитории.
+> `train_tokenizer.py` нужен, только если корпус собран заново.
 
 Теперь сохрани результат (**Save Version** → output как Kaggle Dataset
 `jarvis-corpus`): нужны `tokenizer.json` и папка `data/tokenized/`.
@@ -178,8 +178,8 @@ main.py                 # проверка окружения
 
 ## Если что-то пошло не так
 
-- **`ValueError: В tokenizer.json нет спецтокенов...`** — запусти `python train_tokenizer.py`
-  (нужен свежий токенизатор; файл из репозитория не подходит);
+- **`ValueError: В tokenizer.json нет спецтокенов...`** — пересобери токенизатор:
+  `python train_tokenizer.py` (готовый файл из репозитория проверку проходит);
 - **CUDA out of memory** — уменьши батч: `--micro-batch 16` (или 12);
 - **обучение зависло на инициализации DDP** — попробуй `NCCL_P2P_DISABLE=1 python train.py ...`
   или `--no-ddp` (будет одна GPU);
