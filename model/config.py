@@ -50,20 +50,26 @@ class PhaseConfig:
 
 
 # Этап 1: претрейн на смеси веба и чатов, обычный LM-лосс.
+# Объём подобран под собранный корпус (~0.98B токенов: web 807M, chat 110M,
+# texts 67M). При таких весах по данным получается примерно web 1 проход,
+# chat 3, texts 1. При старых весах (chat 0.45) диалогов в корпусе не хватало
+# и они прокручивались бы ~10 раз — это уже зазубривание, а не обучение.
 PRETRAIN = PhaseConfig(
     name="pretrain",
-    mix=[("web_ru", 0.50, False), ("chat_ru", 0.45, False), ("texts_ru", 0.05, False)],
-    total_tokens=2_600_000_000,
+    mix=[("web_ru", 0.68, False), ("chat_ru", 0.27, False), ("texts_ru", 0.05, False)],
+    total_tokens=1_200_000_000,
     peak_lr=6e-4,
     min_lr_ratio=0.1,
     warmup_steps=1000,
 )
 
 # Этап 2: дожим/дотюн на чатах, лосс только на ответах ассистента.
+# В корпусе 110M токенов диалогов, поэтому 150M токенов SFT — это ~1.3 прохода
+# (300M дали бы ~2.6 в дополнение к ~3 проходам на претрейне).
 SFT = PhaseConfig(
     name="sft",
     mix=[("chat_ru", 0.95, True), ("web_ru", 0.05, True)],
-    total_tokens=300_000_000,
+    total_tokens=150_000_000,
     peak_lr=3e-4,
     min_lr_ratio=0.0,
     warmup_steps=100,
