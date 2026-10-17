@@ -1,0 +1,16 @@
+[
+  {"messages": [{"role": "user", "content": "Привет! Как дела?"}]},
+  {"messages": [{"role": "user", "content": "Расскажи, что ты умеешь."}]},
+  {"messages": [{"role": "user", "content": "Мне скучно. Развлеки меня."}]},
+  {"messages": [{"role": "user", "content": "Расскажи шутку."}]},
+  {"messages": [{"role": "user", "content": "Посоветуй фильм на вечер."}]},
+  {"messages": [{"role": "user", "content": "Как приготовить яичницу?"}]},
+  {"messages": [{"role": "user", "content": "Объясни простыми словами, почему небо голубое."}]},
+  {"messages": [{"role": "user", "content": "Что делать, если я устал и ничего не хочется?"}]},
+  {"messages": [{"role": "user", "content": "Я поссорился с другом. Как помириться?"}]},
+  {"messages": [{"role": "user", "content": "Придумай короткую сказку про кота."}]},
+  {"messages": [{"role": "user", "content": "Что подарить маме на день рождения?"}]},
+  {"messages": [{"role": "user", "content": "Давай поболтаем. О чём ты хочешь поговорить?"}]},
+  {"messages": [{"role": "user", "content": "Привет!"}, {"role": "assistant", "content": "Привет! Рад тебя видеть, как твои дела?"}, {"role": "user", "content": "Нормально. А ты чем занимался сегодня?"}]},
+  {"messages": [{"role": "user", "content": "Мне грустно."}, {"role": "assistant", "content": "Жаль это слышать. Хочешь рассказать, что случилось?"}, {"role": "user", "content": "Просто день не задался. Отвлеки меня чем-нибудь."}]}
+]

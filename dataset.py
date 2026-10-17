@@ -1,34 +1,153 @@
+"""Чтение токенизированного корпуса: ленивая выборка случайных окон из шардов.
+
+Токены хранятся в uint16 (словарь 16384 < 65536), поэтому 1B токенов = 2 ГБ на диске,
+и валидация/обучение читают их через np.memmap, не поднимая корпус в RAM.
+"""
+
+import glob
+import os
+
+import numpy as np
 import torch
-from torch.utils.data import Dataset
-from tokenizers import Tokenizer
-
-from model.config import context_length
+from torch.utils.data import IterableDataset
 
 
-class TextDataset(Dataset):
-    def __init__(self, tokenizer_path, text_path):
-        self.tokenizer = Tokenizer.from_file(tokenizer_path)
-        with open(text_path, "r", encoding="utf-8") as f:
-            text = f.read()
-        ids = self.tokenizer.encode(text).ids
-        self.data = torch.tensor(ids, dtype=torch.long)
+class TokenStreamDataset(IterableDataset):
+    """Бесконечный поток случайных окон (x, y, mask) из нескольких источников.
 
-    def __len__(self):
-        return len(self.data) - context_length
+    mix: список (имя_источника, вес, использовать_маску).
+    Для чатов рядом с shard_XXXX.bin лежит shard_XXXX.mask.bin (uint8),
+    где 1 = токен принадлежит ответу ассистента (в лоссе), 0 = токен пользователя.
+    """
 
-    def __getitem__(self, idx):
-        chunk = self.data[idx: idx + context_length + 1]
-        x = chunk[:-1]
-        y = chunk[1:]
-        return x, y
+    def __init__(self, data_dir, mix, seq_len, seed=0, rank=0, world_size=1):
+        super().__init__()
+        self.seq_len = seq_len
+        self.sources = []
+        for name, weight, use_mask in mix:
+            shards = sorted(glob.glob(os.path.join(data_dir, name, "shard_*.bin")))
+            shards = [s for s in shards if not s.endswith(".mask.bin")]
+            if not shards:
+                raise FileNotFoundError(f"Нет шардов для источника '{name}' в {data_dir}/{name}")
+            # слишком короткие шарды не дадут окно seq_len+1 токенов: отбрасываем сразу,
+            # иначе __iter__ будет бесконечно их перебирать и DataLoader повиснет
+            usable = [s for s in shards if os.path.getsize(s) // 2 > seq_len + 1]
+            if not usable:
+                raise ValueError(
+                    f"Все шарды источника '{name}' короче окна ({seq_len + 2} токенов) — "
+                    f"проверь данные в {data_dir}/{name}")
+            self.sources.append({"name": name, "use_mask": use_mask, "shards": usable})
+
+        total_weight = sum(w for _, w, _ in mix)
+        self.probs = np.array([w / total_weight for _, w, _ in mix], dtype=np.float64)
+        self.seed = seed
+        self.rank = rank
+        self.world_size = world_size
+
+    def __iter__(self):
+        info = torch.utils.data.get_worker_info()
+        worker_id = info.id if info is not None else 0
+        rng = np.random.default_rng((self.seed * 1_000_003 + self.rank * 1_000_033 + worker_id * 1_000 + 7) % (2 ** 63))
+
+        memmaps = {}
+        mask_memmaps = {}
+        while True:
+            src = self.sources[int(rng.choice(len(self.sources), p=self.probs))]
+            shard_path = src["shards"][int(rng.integers(len(src["shards"])))]
+
+            mm = memmaps.get(shard_path)
+            if mm is None:
+                mm = np.memmap(shard_path, dtype=np.uint16, mode="r")
+                memmaps[shard_path] = mm
+            if len(mm) <= self.seq_len + 1:
+                continue
+
+            start = int(rng.integers(0, len(mm) - self.seq_len - 1))
+            x = torch.from_numpy(np.asarray(mm[start:start + self.seq_len], dtype=np.int64))
+            y = torch.from_numpy(np.asarray(mm[start + 1:start + 1 + self.seq_len], dtype=np.int64))
+
+            mask = torch.ones(self.seq_len, dtype=torch.bool)
+            if src["use_mask"]:
+                mask_path = shard_path[:-4] + ".mask.bin"
+                if os.path.exists(mask_path):
+                    mmm = mask_memmaps.get(mask_path)
+                    if mmm is None:
+                        mmm = np.memmap(mask_path, dtype=np.uint8, mode="r")
+                        mask_memmaps[mask_path] = mmm
+                    length = min(self.seq_len, len(mmm) - 1 - start)
+                    if length > 0:
+                        mask[:length] = torch.from_numpy(
+                            np.asarray(mmm[start + 1:start + 1 + length], dtype=np.uint8)).bool()
+            yield x, y, mask
+
+
+def collate_batch(batch):
+    xs, ys, masks = zip(*batch)
+    return torch.stack(xs), torch.stack(ys), torch.stack(masks)
+
+
+def load_val_batches(val_dir, source_names, seq_len, batch_size=8, n_batches=8, seed=1234,
+                     masked_sources=None):
+    """Фиксированные батчи валидации (одинаковые при каждом запуске).
+
+    masked_sources: имена источников, для которых применяется маска лосса
+    (в pretrain чаты в лосс не маскируются, в SFT — маскируются).
+    None — применять маску всем, у кого рядом лежит .mask.bin.
+    """
+    rng = np.random.default_rng(seed)
+    result = {}
+    for name in source_names:
+        shards = sorted(glob.glob(os.path.join(val_dir, name, "shard_*.bin")))
+        shards = [s for s in shards if not s.endswith(".mask.bin")]
+        if not shards:
+            continue
+
+        xs, ys, masks = [], [], []
+        for _ in range(n_batches):
+            path = shards[int(rng.integers(len(shards)))]
+            mm = np.memmap(path, dtype=np.uint16, mode="r")
+            if len(mm) <= seq_len + 1:
+                continue
+            start = int(rng.integers(0, len(mm) - seq_len - 1))
+            xs.append(torch.from_numpy(np.asarray(mm[start:start + seq_len], dtype=np.int64)))
+            ys.append(torch.from_numpy(np.asarray(mm[start + 1:start + 1 + seq_len], dtype=np.int64)))
+
+            mask = np.ones(seq_len, dtype=np.uint8)
+            use_mask = masked_sources is None or name in masked_sources
+            mask_path = path[:-4] + ".mask.bin"
+            if use_mask and os.path.exists(mask_path):
+                mmm = np.memmap(mask_path, dtype=np.uint8, mode="r")
+                length = min(seq_len, len(mmm) - 1 - start)
+                if length > 0:
+                    mask[:length] = np.asarray(mmm[start + 1:start + 1 + length], dtype=np.uint8)
+            masks.append(torch.from_numpy(mask.astype(bool)))
+
+        if xs:
+            result[name] = (torch.stack(xs), torch.stack(ys), torch.stack(masks))
+    return result
+
+
+def format_stats(tokenized_dir):
+    lines = []
+    for split in ("train", "val"):
+        split_dir = os.path.join(tokenized_dir, split)
+        if not os.path.isdir(split_dir):
+            continue
+        lines.append(f"[{split}]")
+        for name in sorted(os.listdir(split_dir)):
+            tokens = 0
+            mask_tokens = 0
+            for path in glob.glob(os.path.join(split_dir, name, "shard_*.bin")):
+                if path.endswith(".mask.bin"):
+                    mask_tokens += os.path.getsize(path)
+                else:
+                    tokens += os.path.getsize(path) // 2
+            mask_info = f", включает маску: {'да' if mask_tokens else 'нет'}" if split == "train" else ""
+            lines.append(f"  {name}: {tokens / 1e6:.1f}M токенов{mask_info}")
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":
-    dataset = TextDataset("tokenizer.json", "data/raw/dialogues.txt")
-    print("Размер датасета (количество возможных окон):", len(dataset))
+    from model.config import TOKENIZED_DIR
 
-    x, y = dataset[0]
-    print("x shape:", x.shape)
-    print("y shape:", y.shape)
-    print("x[:10]:", x[:10])
-    print("y[:10]:", y[:10])
+    print(format_stats(TOKENIZED_DIR))

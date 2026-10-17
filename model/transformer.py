@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
 
-from model.config import vocab_size, context_length, d_model, dropout, n_layers
 from model.block import TransformerBlock
+from model.config import MODEL_PRESETS, ModelConfig
+from model.norm import RMSNorm
 
 
 def _init_weights(module):
@@ -15,46 +16,76 @@ def _init_weights(module):
 
 
 class TransformerLM(nn.Module):
-    def __init__(self):
+    """GPT-подобная модель: RoPE, RMSNorm, SwiGLU, tied embeddings, без bias."""
+
+    def __init__(self, cfg: ModelConfig = None):
         super().__init__()
-        self.token_embedding = nn.Embedding(vocab_size, d_model)
-        self.position_embedding = nn.Embedding(context_length, d_model)
-        self.dropout = nn.Dropout(dropout)
+        cfg = cfg or MODEL_PRESETS["main"]
+        self.cfg = cfg
 
-        self.blocks = nn.ModuleList([TransformerBlock() for _ in range(n_layers)])
+        self.token_embedding = nn.Embedding(cfg.vocab_size, cfg.d_model)
+        self.dropout = nn.Dropout(cfg.dropout)
 
-        self.ln_final = nn.LayerNorm(d_model)
-        self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
+        self.blocks = nn.ModuleList([TransformerBlock(cfg) for _ in range(cfg.n_layers)])
 
-        self.lm_head.weight = self.token_embedding.weight
+        self.ln_final = RMSNorm(cfg.d_model, cfg.norm_eps)
+        self.lm_head = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
+
+        self.lm_head.weight = self.token_embedding.weight  # tied embeddings
 
         self.apply(_init_weights)
 
-    def forward(self, idx):
-        batch_size, seq_len = idx.shape
-        positions = torch.arange(seq_len, device=idx.device)
+    def forward(self, idx, caches=None, use_cache=False):
+        """idx: (batch, seq). Возвращает logits, а при use_cache=True — (logits, новые caches)."""
+        x = self.dropout(self.token_embedding(idx))
 
-        tok_emb = self.token_embedding(idx)
-        pos_emb = self.position_embedding(positions)
+        new_caches = [] if use_cache else None
+        for i, block in enumerate(self.blocks):
+            cache = caches[i] if caches is not None else None
+            x, new_cache = block(x, cache)
+            if use_cache:
+                new_caches.append(new_cache)
 
-        x = tok_emb + pos_emb
-        x = self.dropout(x)
-
-        for block in self.blocks:
-            x = block(x)
-
-        x = self.ln_final(x)
-        logits = self.lm_head(x)
+        logits = self.lm_head(self.ln_final(x))
+        if use_cache:
+            return logits, new_caches
         return logits
+
+    def n_params(self, non_embedding=False):
+        n = sum(p.numel() for p in self.parameters())
+        if non_embedding:
+            n -= self.token_embedding.weight.numel()
+        return n
 
 
 if __name__ == "__main__":
-    model = TransformerLM()
-    dummy_input = torch.randint(0, vocab_size, (4, context_length))
-    output = model(dummy_input)
-    print("Входной shape:", dummy_input.shape)
-    print("Выходной shape:", output.shape)
+    for name in ("dev", "main"):
+        cfg = MODEL_PRESETS[name]
+        model = TransformerLM(cfg)
+        dummy_input = torch.randint(0, cfg.vocab_size, (4, cfg.context_length))
+        output = model(dummy_input)
+        n_params = model.n_params()
+        print(f"--- пресет {name} ---")
+        print("Входной shape:", dummy_input.shape)
+        print("Выходной shape:", output.shape)
+        print(f"Параметров: {n_params / 1e6:.1f}M (без эмбеддингов: {model.n_params(True) / 1e6:.1f}M)")
 
-    n_params = sum(p.numel() for p in model.parameters())
-    print("Количество параметров модели:", n_params)
-    print("В миллионах:", round(n_params / 1e6, 2), "M")
+    # Проверка эквивалентности генерации с KV-кэшем и без него
+    cfg = MODEL_PRESETS["dev"]
+    model = TransformerLM(cfg)
+    model.eval()
+    ids = torch.randint(0, cfg.vocab_size, (2, 16))
+
+    full_logits = model(ids)
+
+    caches = None
+    step_logits = []
+    for t in range(16):
+        logits, caches = model(ids[:, t:t + 1], caches=caches, use_cache=True)
+        step_logits.append(logits)
+    incremental_logits = torch.cat(step_logits, dim=1)
+
+    diff = (full_logits - incremental_logits).abs().max().item()
+    print("Максимальное расхождение KV-кэш vs полный проход:", diff)
+    assert diff < 1e-5, "KV-кэш работает некорректно"
+    print("OK")
