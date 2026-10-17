@@ -43,8 +43,8 @@ from chat_format import build_prompt, check_tokenizer, decode_ids, stop_ids
 from dataset import TokenStreamDataset, collate_batch, load_val_batches
 from generate import generate_ids
 from model.config import (CHECKPOINT_DIR, CKPT_MINUTES, LOG_EVERY_STEPS, MODEL_PRESETS,
-                          NUM_WORKERS, PHASES, SAMPLE_EVERY_STEPS, SESSION_HOURS,
-                          TOKENIZED_DIR, TOKENIZER_PATH, VAL_EVERY_STEPS)
+                          NUM_WORKERS, PHASES, SAMPLE_EVERY_STEPS, SAMPLE_FIRST_STEPS,
+                          SESSION_HOURS, TOKENIZED_DIR, TOKENIZER_PATH, VAL_EVERY_STEPS)
 from model.transformer import TransformerLM
 
 _STOP = False
@@ -126,6 +126,8 @@ def parse_args():
     parser.add_argument("--val-batch", type=int, default=VAL_BATCH)
     parser.add_argument("--val-count", type=int, default=8)
     parser.add_argument("--sample-every", type=int, default=SAMPLE_EVERY_STEPS)
+    parser.add_argument("--sample-first", type=int, default=SAMPLE_FIRST_STEPS,
+                        help="шаг первого снимка примеров в начале сессии (0 = выключено)")
     parser.add_argument("--log-every", type=int, default=LOG_EVERY_STEPS)
     return parser.parse_args()
 
@@ -383,6 +385,7 @@ def worker(rank, world_size, args, model_cfg, phase):
     session_start = time.time()
     last_ckpt = time.time()
     loss_window = []
+    early_sample_done = False
     log_tokens = tokens_seen
     log_time = time.time()
     stop_reason = "цикл завершён"
@@ -483,6 +486,16 @@ def worker(rank, world_size, args, model_cfg, phase):
             if is_main and golden:
                 run_samples()
                 print(f"[примеры] ответы записаны в {args.out_dir}/samples/step_{step:08d}.txt", flush=True)
+            barrier()
+            early_sample_done = True
+        elif not early_sample_done and args.sample_first and step >= args.sample_first:
+            # снимок в начале сессии: иначе качество модели видно только через
+            # тысячи шагов, а при resume (step уже большой) — сразу на первом шаге
+            barrier()
+            if is_main and golden:
+                run_samples()
+                print(f"[примеры] снимок в начале сессии: samples/step_{step:08d}.txt", flush=True)
+            early_sample_done = True
             barrier()
 
         if do_ckpt:

@@ -82,6 +82,7 @@ SESSION_HOURS = 11.0        # мягкая остановка сессии (се
 CKPT_MINUTES = 15.0         # как часто сохранять чекпоинт
 VAL_EVERY_STEPS = 1000      # как часто считать валидацию
 SAMPLE_EVERY_STEPS = 4000   # как часто писать примеры ответов на golden prompts
+SAMPLE_FIRST_STEPS = 20     # первый снимок примеров в начале сессии (0 = выключено)
 LOG_EVERY_STEPS = 20
 NUM_WORKERS = 2
 
