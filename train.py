@@ -266,7 +266,7 @@ def worker(rank, world_size, args, model_cfg, phase):
         return phase.peak_lr * (phase.min_lr_ratio + (1 - phase.min_lr_ratio) * 0.5 * (1 + math.cos(math.pi * progress)))
 
     if is_main:
-        planned_steps = max(1, (phase.total_tokens - phase_tokens) // tokens_per_step)
+        planned_steps = max(1, math.ceil((phase.total_tokens - phase_tokens) / tokens_per_step))
         print(f"Токенов на шаг: {tokens_per_step:,} | шагов в плане: ~{planned_steps:,} | "
               f"устройств: {world_size} | dtype: {'fp16' if use_fp16 else (amp_dtype if use_cuda else 'fp32')}")
 
