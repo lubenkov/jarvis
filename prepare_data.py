@@ -1,17 +1,3 @@
-"""Подготовка корпуса: скачивает датасеты и складывает их в data/corpus/*.jsonl.
-
-Результат:
-    data/corpus/web_ru.jsonl    — веб-текст, строки {"text": ...}
-    data/corpus/texts_ru.jsonl  — новости/статьи, строки {"text": ...}
-    data/corpus/chat_ru.jsonl   — диалоги, строки {"messages": [{"role", "content"}, ...]}
-
-Запуск (на Kaggle включи Internet):
-    python prepare_data.py --what web --max-web-docs 1000000
-    python prepare_data.py --what texts --max-texts-docs 150000
-    python prepare_data.py --what chats
-    python prepare_data.py --what all --dry-run   # быстрая проверка схем
-"""
-
 import argparse
 import hashlib
 import json
@@ -43,7 +29,6 @@ def cyrillic_ratio(text):
 
 
 def extract_generic(ex):
-    """Пробует вытащить список сообщений из строки датасета в 6+ разных форматах."""
     for key in LIST_KEYS:
         value = ex.get(key)
         if isinstance(value, list) and value and isinstance(value[0], dict):
@@ -67,7 +52,6 @@ def extract_generic(ex):
 
 
 def extract_jokes(ex):
-    """inkoziev/jokes_dialogues: context — предыдущий диалог, utterance — ответ-шутка."""
     context = (ex.get("context") or "").strip()
     utterance = (ex.get("utterance") or "").strip()
     if not utterance:
@@ -89,7 +73,6 @@ CHAT_SOURCES = [
     {
         "name": "saiga_scored",
         "dataset": "IlyaGusev/saiga_scored",
-        # поля language/opus_score/is_bad_by_regex есть в схеме; если вдруг нет — не фильтруем
         "filter": lambda ex: ex.get("language") in (None, "Russian")
                              and (10 if ex.get("opus_score") is None else ex.get("opus_score")) >= 7
                              and not ex.get("is_bad_by_regex", False),
@@ -119,7 +102,7 @@ def _write_conversation(f, messages, seen_hashes, stats):
     if cyrillic_ratio(joined) < MIN_CYRILLIC_RATIO:
         stats["filtered"] += 1
         return False
-    if prepared[-1][0] != "assistant":  # промпт без ответа бесполезен
+    if prepared[-1][0] != "assistant":
         stats["filtered"] += 1
         return False
     digest = hashlib.md5(joined.encode("utf-8")).hexdigest()
@@ -135,7 +118,6 @@ def _write_conversation(f, messages, seen_hashes, stats):
 
 
 def _web_shards():
-    """Parquet-шарды fineweb-2 rus_Cyrl/train в стабильном (лексикографическом) порядке."""
     from huggingface_hub import HfApi
 
     files = [(f.path, f.size or 0)
@@ -147,17 +129,10 @@ def _web_shards():
 
 
 def _open_web_corpus(building_path, stats):
-    """Открывает частичный корпус на дозапись и восстанавливает seen_hashes.
-
-    Корпус пишется в отдельный .building и переименовывается в готовый файл только
-    в самом конце: обрыв процесса не портит ни прошлый готовый корпус, ни уже
-    записанные строки. Недописанный хвост (если процесс убили во время f.write)
-    обрезается, хэши восстановленных строк снова участвуют в дедупликации.
-    """
     if not os.path.exists(building_path):
         return open(building_path, "w", encoding="utf-8"), set()
 
-    print(f"  найден частичный корпус ({os.path.getsize(building_path) / 1e9:.1f} ГБ) — восстанавливаю хэши")
+    print(f"  found partial corpus ({os.path.getsize(building_path) / 1e9:.1f} GB) — restoring hashes")
     seen_hashes = set()
     good_bytes = 0
     with open(building_path, "rb") as f:
@@ -177,20 +152,6 @@ def _open_web_corpus(building_path, stats):
 
 
 def build_web(out_path, max_docs, dry_run=False):
-    """fineweb-2 rus_Cyrl -> web_ru.jsonl, шард за шардом.
-
-    Почему не load_dataset(..., streaming=True): на длинных прогонах у него течёт
-    RSS — Python-обёртки файлов между fsspec и pyarrow накапливаются на каждое
-    чтение (huggingface/datasets#7269), а у шарда fineweb-2 1815 row groups по 1000
-    строк — тысячи чтений. На 16 ГБ ОЗУ это MemoryError после ~700k документов.
-    Здесь шард качается целиком во временный каталог (hf_hub_download умеет
-    докачивать недоскачанное) и читается локально нативным pyarrow батчами по
-    WEB_BATCH_DOCS: память ограничена одним батчем.
-
-    Прерывание не теряет прогресс: частичный корпус лежит в {out_path}.building
-    (при перезапуске продолжается с него), скачанный шард удаляется только после
-    полной обработки.
-    """
     import pyarrow.parquet as pq
     from huggingface_hub import hf_hub_download
 
@@ -200,14 +161,14 @@ def build_web(out_path, max_docs, dry_run=False):
     shard_dir = out_path + ".parts"
 
     files = _web_shards()
-    print(f"  шардов в датасете: {len(files)}, читаю с первого")
+    print(f"  shards in dataset: {len(files)}, reading from the first one")
     os.makedirs(shard_dir, exist_ok=True)
     f, seen_hashes = _open_web_corpus(building_path, stats)
     try:
         for idx, (name, size) in enumerate(files, start=1):
             if stats["written"] >= limit:
                 break
-            print(f"  шард {idx}/{len(files)}: {os.path.basename(name)} ({size / 1e9:.1f} ГБ)")
+            print(f"  shard {idx}/{len(files)}: {os.path.basename(name)} ({size / 1e9:.1f} GB)")
             try:
                 local_path = hf_hub_download(WEB_REPO, name, repo_type="dataset",
                                              local_dir=shard_dir)
@@ -233,18 +194,18 @@ def build_web(out_path, max_docs, dry_run=False):
                         f.write(json.dumps({"text": text}, ensure_ascii=False) + "\n")
                         stats["written"] += 1
                         if stats["written"] % 50000 == 0:
-                            print(f"  ... записано {stats['written']} документов")
+                            print(f"  ... wrote {stats['written']} documents")
                         if stats["written"] >= limit:
                             stop = True
                             break
                     if stop:
                         break
                 parquet_file.close()
-                os.remove(local_path)  # шард прочитан целиком — диск не копим
-                print(f"  ... шард обработан: прочитано {stats['read']}, записано {stats['written']}")
+                os.remove(local_path)
+                print(f"  ... shard done: read {stats['read']}, wrote {stats['written']}")
                 f.flush()
             except Exception as error:
-                print(f"  ! шард {name} не обработан: {type(error).__name__}: {error}")
+                print(f"  ! shard {name} failed: {type(error).__name__}: {error}")
     finally:
         f.close()
 
@@ -292,7 +253,7 @@ def process_chat_source(f, spec, seen_hashes, dry_run=False):
     try:
         dataset = load_dataset(spec["dataset"], split=spec.get("split", "train"))
     except Exception as error:
-        print(f"  ! Не удалось загрузить {spec['dataset']}: {error}")
+        print(f"  ! failed to load {spec['dataset']}: {error}")
         return stats
 
     limit = spec.get("limit") or 10 ** 9
@@ -312,7 +273,6 @@ def process_chat_source(f, spec, seen_hashes, dry_run=False):
 
 
 def build_oasst(f, seen_hashes, dry_run=False):
-    """OpenAssistant/oasst1: собираем ветки диалогов по дереву сообщений (только русский)."""
     from datasets import load_dataset
 
     stats = {"read": 0, "written": 0, "filtered": 0}
@@ -351,8 +311,8 @@ def save_stats(out_dir, name, stats):
     path = os.path.join(out_dir, f"{name}.stats.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(stats, f, ensure_ascii=False, indent=2)
-    print(f"  Итог {name}: прочитано {stats['read']}, записано {stats['written']}, "
-          f"отфильтровано {stats['filtered']}")
+    print(f"  Summary {name}: read {stats['read']}, wrote {stats['written']}, "
+          f"filtered {stats['filtered']}")
 
 
 def main():
@@ -361,7 +321,7 @@ def main():
     parser.add_argument("--out-dir", default=CORPUS_DIR)
     parser.add_argument("--max-web-docs", type=int, default=1_000_000)
     parser.add_argument("--max-texts-docs", type=int, default=150_000)
-    parser.add_argument("--dry-run", action="store_true", help="взять по 50-100 примеров и проверить схемы")
+    parser.add_argument("--dry-run", action="store_true", help="take 50-100 examples and validate schemas")
     args = parser.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -395,7 +355,7 @@ def main():
                 total[k] += stats[k]
         save_stats(args.out_dir, "chat_ru", total)
 
-    print("Готово.")
+    print("Done.")
 
 
 if __name__ == "__main__":

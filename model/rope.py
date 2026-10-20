@@ -3,30 +3,18 @@ import torch.nn as nn
 
 
 class RoPE(nn.Module):
-    """Rotary Position Embeddings.
-
-    Позиция кодируется поворотом пар соседних компонент q и k на угол,
-    зависящий от номера позиции. Позволяет обходиться без обучаемых эмбеддингов позиций.
-    """
-
     def __init__(self, head_dim, theta=10000.0, max_seq_len=4096):
         super().__init__()
         assert head_dim % 2 == 0
 
         inv_freq = 1.0 / (theta ** (torch.arange(0, head_dim, 2).float() / head_dim))
         positions = torch.arange(max_seq_len).float()
-        freqs = torch.outer(positions, inv_freq)  # (max_seq_len, head_dim // 2)
+        freqs = torch.outer(positions, inv_freq)
 
         self.register_buffer("cos_cached", freqs.cos(), persistent=False)
         self.register_buffer("sin_cached", freqs.sin(), persistent=False)
 
     def rotate(self, q, k, offset=0):
-        """Поворачивает q и k. offset — позиция первого токена (для генерации с KV-кэшем).
-
-        Метод намеренно не называется apply: он перекрыл бы nn.Module.apply,
-        и рекурсивный обход модулей (например, инициализация весов через
-        model.apply(fn)) падал бы с TypeError.
-        """
         seq_len = q.shape[2]
         cos = self.cos_cached[offset:offset + seq_len].to(q.dtype)[None, None]
         sin = self.sin_cached[offset:offset + seq_len].to(q.dtype)[None, None]

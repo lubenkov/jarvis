@@ -1,23 +1,3 @@
-"""Обучение TransformerLM: AMP, расписание LR, resume, DDP на нескольких GPU.
-
-Примеры:
-    # быстрая проверка (одна GPU или CPU)
-    python train.py --preset dev --phase pretrain --max-tokens 50000000 --session-hours 1
-    # боевой запуск на Kaggle (2xT4)
-    python train.py --preset main --phase pretrain
-    # продолжение с последнего чекпоинта
-    python train.py --preset main --phase pretrain --resume auto
-    # начать заново, игнорируя чекпоинты
-    python train.py --preset main --phase pretrain --resume none
-
-Особенности под Kaggle: обучение идёт сессиями, каждая сессия мягко останавливается
-по времени (--session-hours) и сохраняет ПОЛНЫЙ чекпоинт (модель + оптимизатор +
-scaler + счётчики), поэтому между сессиями ничего не теряется.
-
-Точность AMP выбирается автоматически: fp16 на Turing/Volta (T4), bf16 на Ampere+.
-Принудительно — флагом --dtype.
-"""
-
 import argparse
 import contextlib
 import glob
@@ -49,15 +29,15 @@ from model.transformer import TransformerLM
 
 _STOP = False
 VAL_BATCH = 8
-# device_id в init_process_group появился только в torch 2.6: подставляем его
-# условно, чтобы проект не терял совместимость со старыми torch
+
+
 _PG_HAS_DEVICE_ID = "device_id" in inspect.signature(dist.init_process_group).parameters
 
 
 def _on_signal(signum, _frame):
     global _STOP
     _STOP = True
-    print(f"\n[сигнал {signum}] завершусь после текущего шага и сохранюсь", flush=True)
+    print(f"\n[signal {signum}] will stop after the current step and save", flush=True)
 
 
 def _autocast(enabled, dtype):
@@ -69,14 +49,14 @@ def _autocast(enabled, dtype):
 def _make_scaler(enabled):
     try:
         return torch.amp.GradScaler("cuda", enabled=enabled)
-    except TypeError:  # старые версии torch
+    except TypeError:
         return torch.cuda.amp.GradScaler(enabled=enabled)
 
 
 def _torch_load(path, map_location):
     try:
         return torch.load(path, map_location=map_location, weights_only=False)
-    except TypeError:  # torch < 2.0
+    except TypeError:
         return torch.load(path, map_location=map_location)
 
 
@@ -86,12 +66,6 @@ def _set_lr(optimizer, lr):
 
 
 def _resolve_amp(pref, use_cuda):
-    """Точность AMP: (use_fp16, amp_dtype).
-
-    auto — bf16 только там, где он аппаратный (Ampere/Ada/Hopper+); на Turing и
-    Volta (T4) берём fp16: тамошний bf16 существует лишь эмуляцией, а это
-    медленные ядра внимания и заметно больший расход памяти (на T4 — OOM).
-    """
     if not use_cuda:
         return False, torch.float32
     if pref == "fp16":
@@ -116,10 +90,10 @@ def parse_args():
     parser.add_argument("--grad-accum", type=int, default=None)
     parser.add_argument("--peak-lr", type=float, default=None)
     parser.add_argument("--num-workers", type=int, default=NUM_WORKERS)
-    parser.add_argument("--resume", default="auto", help="auto | none | путь к .pt")
-    parser.add_argument("--no-ddp", action="store_true", help="использовать только одну GPU")
+    parser.add_argument("--resume", default="auto", help="auto | none | path to .pt")
+    parser.add_argument("--no-ddp", action="store_true", help="use only one GPU")
     parser.add_argument("--dtype", choices=["auto", "fp16", "bf16"], default="auto",
-                        help="точность AMP; auto = fp16 на Turing/Volta, bf16 на Ampere+")
+                        help="AMP precision; auto = fp16 on Turing/Volta, bf16 on Ampere+")
     parser.add_argument("--seed", type=int, default=1337)
     parser.add_argument("--ckpt-minutes", type=float, default=CKPT_MINUTES)
     parser.add_argument("--val-every", type=int, default=VAL_EVERY_STEPS)
@@ -127,7 +101,7 @@ def parse_args():
     parser.add_argument("--val-count", type=int, default=8)
     parser.add_argument("--sample-every", type=int, default=SAMPLE_EVERY_STEPS)
     parser.add_argument("--sample-first", type=int, default=SAMPLE_FIRST_STEPS,
-                        help="шаг первого снимка примеров в начале сессии (0 = выключено)")
+                        help="step of the first sample snapshot at session start (0 = disabled)")
     parser.add_argument("--log-every", type=int, default=LOG_EVERY_STEPS)
     return parser.parse_args()
 
@@ -142,7 +116,7 @@ def resolve_resume(args):
     latest = os.path.join(args.out_dir, "latest.pt")
     if os.path.exists(latest):
         return latest
-    # inference.pt не подходит для продолжения: в нём нет оптимизатора и счётчиков
+
     candidates = [p for p in glob.glob(os.path.join(args.out_dir, "*.pt"))
                   if os.path.basename(p) != "inference.pt"]
     if not candidates:
@@ -151,8 +125,6 @@ def resolve_resume(args):
 
 
 def main():
-    # страховка от фрагментации памяти: без неё к концу длинной сессии
-    # аллокатор чаще падает с OOM. Значение можно переопределить до запуска.
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     args = parse_args()
     model_cfg = MODEL_PRESETS[args.preset]
@@ -190,7 +162,7 @@ def worker(rank, world_size, args, model_cfg, phase):
     torch.cuda.manual_seed_all(args.seed)
     np.random.seed(args.seed)
 
-    try:  # чтобы успеть сохраниться, если Kaggle пришлёт SIGTERM
+    try:
         signal.signal(signal.SIGTERM, _on_signal)
         signal.signal(signal.SIGINT, _on_signal)
     except (ValueError, AttributeError):
@@ -200,8 +172,8 @@ def worker(rank, world_size, args, model_cfg, phase):
     check_tokenizer(tokenizer, verbose=is_main)
     if tokenizer.get_vocab_size() != model_cfg.vocab_size:
         if is_main:
-            print(f"vocab_size: беру {tokenizer.get_vocab_size()} из tokenizer.json "
-                  f"(в пресете было {model_cfg.vocab_size})")
+            print(f"vocab_size: using {tokenizer.get_vocab_size()} from tokenizer.json "
+                  f"(preset had {model_cfg.vocab_size})")
         model_cfg = replace(model_cfg, vocab_size=tokenizer.get_vocab_size())
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -210,7 +182,7 @@ def worker(rank, world_size, args, model_cfg, phase):
         model = DDP(model, device_ids=[rank], broadcast_buffers=False, gradient_as_bucket_view=True)
     raw = model.module if isinstance(model, DDP) else model
     if is_main:
-        print(f"Модель: {raw.n_params() / 1e6:.1f}M параметров | GPU: {world_size} | фаза: {phase.name}")
+        print(f"Model: {raw.n_params() / 1e6:.1f}M params | GPUs: {world_size} | phase: {phase.name}")
 
     decay, no_decay = [], []
     for name, param in raw.named_parameters():
@@ -223,7 +195,6 @@ def worker(rank, world_size, args, model_cfg, phase):
          {"params": no_decay, "weight_decay": 0.0}],
         lr=phase.peak_lr, betas=(0.9, 0.95), eps=1e-8)
 
-    # точность AMP: auto = fp16 на T4, bf16 на Ampere+ (см. _resolve_amp)
     use_fp16, amp_dtype = _resolve_amp(args.dtype, use_cuda)
     scaler = _make_scaler(use_fp16)
 
@@ -231,14 +202,14 @@ def worker(rank, world_size, args, model_cfg, phase):
     best_val = float("inf")
     resume_path = resolve_resume(args)
     if resume_path and not os.path.exists(resume_path):
-        raise SystemExit(f"Чекпоинт не найден: {resume_path} (для старта с нуля: --resume none)")
+        raise SystemExit(f"Checkpoint not found: {resume_path} (to start from scratch: --resume none)")
     if resume_path:
         state = _torch_load(resume_path, device)
         if not (isinstance(state, dict) and "model" in state):
-            raise SystemExit(f"{resume_path} — не полный чекпоинт train.py (нет ключа 'model'). "
-                             "Начать заново: --resume none")
+            raise SystemExit(f"{resume_path} is not a complete train.py checkpoint (missing 'model' key). "
+                             "Start over: --resume none")
         if state.get("model_config", {}).get("vocab_size") not in (None, model_cfg.vocab_size):
-            raise SystemExit("vocab_size чекпоинта не совпадает с tokenizer.json — переобучи чекпоинт")
+            raise SystemExit("checkpoint vocab_size does not match tokenizer.json — retrain the checkpoint")
         raw.load_state_dict(state["model"])
         if state.get("optim"):
             optimizer.load_state_dict(state["optim"])
@@ -250,12 +221,11 @@ def worker(rank, world_size, args, model_cfg, phase):
         best_val = state.get("best_val", float("inf"))
         saved_phase = state.get("phase", phase.name)
         if saved_phase == phase.name:
-            # та же фаза: продолжаем её счётчик (в старых чекпоинтах его нет)
             phase_tokens = state.get("phase_tokens", tokens_seen)
         else:
-            phase_tokens = 0  # новая фаза (например, pretrain -> sft): расписание и лимит с нуля
+            phase_tokens = 0
         if is_main:
-            print(f"Продолжаю с {resume_path}: шаг {step}, {tokens_seen / 1e9:.3f}B токенов "
+            print(f"Resuming from {resume_path}: step {step}, {tokens_seen / 1e9:.3f}B tokens "
                   f"({phase.name}: {phase_tokens / 1e6:.0f}M)")
 
     tokens_per_step = phase.micro_batch * phase.grad_accum * world_size * model_cfg.context_length
@@ -289,8 +259,8 @@ def worker(rank, world_size, args, model_cfg, phase):
     if is_main:
         planned_steps = max(1, math.ceil((phase.total_tokens - phase_tokens) / tokens_per_step))
         dtype_name = "fp32" if not use_cuda else ("fp16" if use_fp16 else "bf16")
-        print(f"Токенов на шаг: {tokens_per_step:,} | шагов в плане: ~{planned_steps:,} | "
-              f"устройств: {world_size} | dtype: {dtype_name}")
+        print(f"Tokens per step: {tokens_per_step:,} | planned steps: ~{planned_steps:,} | "
+              f"devices: {world_size} | dtype: {dtype_name}")
 
     def barrier():
         if world_size > 1:
@@ -335,7 +305,7 @@ def worker(rank, world_size, args, model_cfg, phase):
             if os.path.exists(numbered_path):
                 os.remove(numbered_path)
             try:
-                os.link(latest, numbered_path)  # снапшот без повторной сериализации
+                os.link(latest, numbered_path)
             except OSError:
                 shutil.copyfile(latest, numbered_path)
         numbered = sorted(glob.glob(os.path.join(args.out_dir, "ckpt_*.pt")))
@@ -345,7 +315,7 @@ def worker(rank, world_size, args, model_cfg, phase):
         half_state = {k: v.half() for k, v in raw.state_dict().items()}
         torch.save({"model": half_state, "model_config": asdict(model_cfg)},
                    os.path.join(args.out_dir, "inference.pt"))
-        print(f"[чекпоинт] шаг {step}, {tokens_seen / 1e9:.3f}B токенов", flush=True)
+        print(f"[checkpoint] step {step}, {tokens_seen / 1e9:.3f}B tokens", flush=True)
 
     @torch.no_grad()
     def run_val():
@@ -364,7 +334,7 @@ def worker(rank, world_size, args, model_cfg, phase):
 
     def run_samples():
         raw.eval()
-        lines = [f"# шаг {step}, {tokens_seen / 1e9:.3f}B токенов\n"]
+        lines = [f"# step {step}, {tokens_seen / 1e9:.3f}B tokens\n"]
         for item in golden:
             messages = item["messages"]
             ids = build_prompt(tokenizer, messages)
@@ -388,7 +358,7 @@ def worker(rank, world_size, args, model_cfg, phase):
     early_sample_done = False
     log_tokens = tokens_seen
     log_time = time.time()
-    stop_reason = "цикл завершён"
+    stop_reason = "loop finished"
 
     while True:
         local_stop = _STOP or phase_tokens >= phase.total_tokens or \
@@ -400,17 +370,13 @@ def worker(rank, world_size, args, model_cfg, phase):
         do_ckpt = bool(flags[1].item())
         if flags[0].item():
             if _STOP:
-                stop_reason = "получен сигнал остановки"
+                stop_reason = "stop signal received"
             elif phase_tokens >= phase.total_tokens:
-                stop_reason = "этап завершён — набрано плановое число токенов"
+                stop_reason = "phase complete — planned token count reached"
             else:
-                stop_reason = f"сессия достигла лимита {args.session_hours} ч"
+                stop_reason = f"session reached the {args.session_hours} h limit"
             break
 
-        # LR задаём ДО шага оптимизатора, а не после: иначе первая итерация
-        # обучения шла бы с peak_lr из конструктора AdamW (для main-пресета
-        # ~6e-4 вместо warmup ~6e-7), а вся кривая расписания была бы сдвинута
-        # на один шаг вперёд.
         lr = lr_at(phase_tokens)
         _set_lr(optimizer, lr)
 
@@ -455,10 +421,10 @@ def worker(rank, world_size, args, model_cfg, phase):
             remaining = max(0, phase.total_tokens - phase_tokens) / max(1e-6, toks_per_sec)
             session_min = (now - session_start) / 60
             if is_main:
-                print(f"шаг {step:>7} | {tokens_seen / 1e9:.3f}B ({100 * phase_tokens / phase.total_tokens:5.1f}%) "
+                print(f"step {step:>7} | {tokens_seen / 1e9:.3f}B ({100 * phase_tokens / phase.total_tokens:5.1f}%) "
                       f"| loss {avg_loss:.4f} | ppl {math.exp(avg_loss):7.1f} | lr {lr:.2e} "
-                      f"| |grad| {float(grad_norm):6.2f} | {toks_per_sec / 1000:5.1f}k ток/с "
-                      f"| сессия {session_min:5.0f} мин | ETA {remaining / 60:4.0f} мин", flush=True)
+                      f"| |grad| {float(grad_norm):6.2f} | {toks_per_sec / 1000:5.1f}k tok/s "
+                      f"| session {session_min:5.0f} min | ETA {remaining / 60:4.0f} min", flush=True)
                 write_metrics({"step": step, "tokens": tokens_seen, "phase_tokens": phase_tokens,
                                "loss": round(avg_loss, 4),
                                "lr": lr, "grad_norm": round(float(grad_norm), 3),
@@ -473,7 +439,7 @@ def worker(rank, world_size, args, model_cfg, phase):
             if is_main and val_batches:
                 results = run_val()
                 summary = " | ".join(f"{name}: ppl {math.exp(loss):.1f}" for name, loss in results.items())
-                print(f"[валидация] шаг {step}: {summary}", flush=True)
+                print(f"[val] step {step}: {summary}", flush=True)
                 write_metrics({"step": step, "val": results})
                 mean_loss = sum(results.values()) / len(results)
                 if mean_loss < best_val:
@@ -485,16 +451,14 @@ def worker(rank, world_size, args, model_cfg, phase):
             barrier()
             if is_main and golden:
                 run_samples()
-                print(f"[примеры] ответы записаны в {args.out_dir}/samples/step_{step:08d}.txt", flush=True)
+                print(f"[samples] replies written to {args.out_dir}/samples/step_{step:08d}.txt", flush=True)
             barrier()
             early_sample_done = True
         elif not early_sample_done and args.sample_first and step >= args.sample_first:
-            # снимок в начале сессии: иначе качество модели видно только через
-            # тысячи шагов, а при resume (step уже большой) — сразу на первом шаге
             barrier()
             if is_main and golden:
                 run_samples()
-                print(f"[примеры] снимок в начале сессии: samples/step_{step:08d}.txt", flush=True)
+                print(f"[samples] early snapshot: samples/step_{step:08d}.txt", flush=True)
             early_sample_done = True
             barrier()
 
@@ -508,10 +472,10 @@ def worker(rank, world_size, args, model_cfg, phase):
     save_checkpoint()
     barrier()
     if is_main:
-        print(f"\nОстановка: {stop_reason}")
-        print(f"Шагов: {step} | токенов: {tokens_seen / 1e9:.3f}B "
-              f"(фаза: {phase_tokens / 1e9:.3f}B) | "
-              f"время сессии: {(time.time() - session_start) / 3600:.2f} ч")
+        print(f"\nStopped: {stop_reason}")
+        print(f"Steps: {step} | tokens: {tokens_seen / 1e9:.3f}B "
+              f"(phase: {phase_tokens / 1e9:.3f}B) | "
+              f"session time: {(time.time() - session_start) / 3600:.2f} h")
         write_metrics({"step": step, "tokens": tokens_seen, "phase_tokens": phase_tokens,
                        "done": True, "reason": stop_reason})
     if world_size > 1:

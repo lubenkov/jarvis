@@ -1,12 +1,3 @@
-"""Сэмплирование из обученной модели: KV-кэш, temperature, top-k, top-p, repetition penalty.
-
-KV-кэш — главная оптимизация инференса: без него каждый новый токен требует
-полного пересчёта по всему контексту (O(n^2)), с ним — O(1) по прошлым токенам.
-
-Пример:
-    python generate.py --ckpt checkpoints/pretrain/inference.pt --prompt "Привет!"
-"""
-
 import argparse
 
 import torch
@@ -20,10 +11,9 @@ from model.transformer import TransformerLM
 
 
 def load_model(path, device, dtype=None):
-    """Загружает чекпоинт train.py или сырой state_dict (в т.ч. inference.pt в fp16)."""
     try:
         state = torch.load(path, map_location="cpu", weights_only=False)
-    except TypeError:  # torch < 2.0
+    except TypeError:
         state = torch.load(path, map_location="cpu")
     if isinstance(state, dict) and "model" in state:
         cfg_dict = state.get("model_config")
@@ -46,7 +36,6 @@ def load_model(path, device, dtype=None):
 def generate_ids(model, ids, max_new_tokens=MAX_NEW_TOKENS, temperature=TEMPERATURE,
                  top_k=TOP_K, top_p=TOP_P, repetition_penalty=REPETITION_PENALTY,
                  stop_token_ids=None, callback=None):
-    """Генерирует продолжение. ids — список или тензор (1, T). Возвращает итоговый тензор."""
     if isinstance(ids, list):
         ids = torch.tensor([ids], dtype=torch.long)
     device = next(model.parameters()).device
@@ -108,11 +97,11 @@ def main():
     tokenizer = Tokenizer.from_file(args.tokenizer)
     check_tokenizer(tokenizer)
     model, model_cfg = load_model(args.ckpt, device)
-    print(f"Модель загружена ({model.n_params() / 1e6:.1f}M параметров, {device.type})")
+    print(f"Model loaded ({model.n_params() / 1e6:.1f}M params, {device.type})")
 
     ids = build_prompt(tokenizer, [{"role": "user", "content": args.prompt}])
     max_prompt_tokens = max(8, model_cfg.context_length - args.max_new)
-    if len(ids) > max_prompt_tokens:  # длинный промпт не должен пробивать контекст/RoPE
+    if len(ids) > max_prompt_tokens:
         ids = ids[-max_prompt_tokens:]
     out = generate_ids(model, ids, max_new_tokens=args.max_new, temperature=args.temperature,
                        top_k=args.top_k, top_p=args.top_p, repetition_penalty=args.rep_penalty,

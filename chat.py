@@ -1,9 +1,3 @@
-"""Консольный чат с моделью. Диалог ведётся в том же формате, что и при обучении.
-
-Пример:
-    python chat.py --ckpt checkpoints/pretrain/inference.pt
-"""
-
 import argparse
 
 import torch
@@ -37,29 +31,29 @@ def main():
     stops = stop_ids(tokenizer)
     max_prompt_tokens = max(64, model_cfg.context_length - args.max_new)
 
-    print(f"Мини-Джарвис готов: {args.ckpt} ({model.n_params() / 1e6:.1f}M параметров, {device.type})")
-    print("Команды: /reset — очистить историю, /temp X — температура, exit — выход")
+    print(f"Mini Jarvis ready: {args.ckpt} ({model.n_params() / 1e6:.1f}M params, {device.type})")
+    print("Commands: /reset — clear history, /temp X — temperature, exit — quit")
 
     history = []
     while True:
         try:
-            user = input("\nТы: ").strip()
+            user = input("\nYou: ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
             break
         if not user:
             continue
-        if user.lower() in ("exit", "выход"):
+        if user.lower() == "exit":
             break
         if user == "/reset":
             history = []
-            print("История очищена.")
+            print("History cleared.")
             continue
         if user.startswith("/temp"):
             try:
                 args.temperature = float(user.split()[1])
             except (IndexError, ValueError):
-                print("Пример: /temp 0.9")
+                print("Example: /temp 0.9")
                 continue
             print(f"temperature = {args.temperature}")
             continue
@@ -69,7 +63,7 @@ def main():
             history.pop(0)
         messages = truncate_messages(tokenizer, history, max_prompt_tokens)
         ids = build_prompt(tokenizer, messages)
-        if len(ids) > max_prompt_tokens:  # страховка от экзотической токенизации
+        if len(ids) > max_prompt_tokens:
             ids = ids[-max_prompt_tokens:]
 
         printed = {"n": 0}
@@ -80,7 +74,7 @@ def main():
                 print(text[printed["n"]:], end="", flush=True)
                 printed["n"] = len(text)
 
-        print("Джарвис: ", end="", flush=True)
+        print("Jarvis: ", end="", flush=True)
         out = generate_ids(model, torch.tensor([ids], dtype=torch.long),
                            max_new_tokens=args.max_new, temperature=args.temperature,
                            top_k=args.top_k, top_p=args.top_p,

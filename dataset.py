@@ -1,9 +1,3 @@
-"""Чтение токенизированного корпуса: ленивая выборка случайных окон из шардов.
-
-Токены хранятся в uint16 (словарь 16384 < 65536), поэтому 1B токенов = 2 ГБ на диске,
-и валидация/обучение читают их через np.memmap, не поднимая корпус в RAM.
-"""
-
 import glob
 import os
 
@@ -13,13 +7,6 @@ from torch.utils.data import IterableDataset
 
 
 class TokenStreamDataset(IterableDataset):
-    """Бесконечный поток случайных окон (x, y, mask) из нескольких источников.
-
-    mix: список (имя_источника, вес, использовать_маску).
-    Для чатов рядом с shard_XXXX.bin лежит shard_XXXX.mask.bin (uint8),
-    где 1 = токен принадлежит ответу ассистента (в лоссе), 0 = токен пользователя.
-    """
-
     def __init__(self, data_dir, mix, seq_len, seed=0, rank=0, world_size=1):
         super().__init__()
         self.seq_len = seq_len
@@ -28,14 +15,13 @@ class TokenStreamDataset(IterableDataset):
             shards = sorted(glob.glob(os.path.join(data_dir, name, "shard_*.bin")))
             shards = [s for s in shards if not s.endswith(".mask.bin")]
             if not shards:
-                raise FileNotFoundError(f"Нет шардов для источника '{name}' в {data_dir}/{name}")
-            # слишком короткие шарды не дадут окно seq_len+1 токенов: отбрасываем сразу,
-            # иначе __iter__ будет бесконечно их перебирать и DataLoader повиснет
+                raise FileNotFoundError(f"No shards for source '{name}' in {data_dir}/{name}")
+
             usable = [s for s in shards if os.path.getsize(s) // 2 > seq_len + 1]
             if not usable:
                 raise ValueError(
-                    f"Все шарды источника '{name}' короче окна ({seq_len + 2} токенов) — "
-                    f"проверь данные в {data_dir}/{name}")
+                    f"All shards for source '{name}' are shorter than the window ({seq_len + 2} tokens) — "
+                    f"check the data in {data_dir}/{name}")
             self.sources.append({"name": name, "use_mask": use_mask, "shards": usable})
 
         total_weight = sum(w for _, w, _ in mix)
@@ -88,12 +74,6 @@ def collate_batch(batch):
 
 def load_val_batches(val_dir, source_names, seq_len, batch_size=8, n_batches=8, seed=1234,
                      masked_sources=None):
-    """Фиксированные батчи валидации (одинаковые при каждом запуске).
-
-    masked_sources: имена источников, для которых применяется маска лосса
-    (в pretrain чаты в лосс не маскируются, в SFT — маскируются).
-    None — применять маску всем, у кого рядом лежит .mask.bin.
-    """
     rng = np.random.default_rng(seed)
     result = {}
     for name in source_names:
@@ -142,8 +122,8 @@ def format_stats(tokenized_dir):
                     mask_tokens += os.path.getsize(path)
                 else:
                     tokens += os.path.getsize(path) // 2
-            mask_info = f", включает маску: {'да' if mask_tokens else 'нет'}" if split == "train" else ""
-            lines.append(f"  {name}: {tokens / 1e6:.1f}M токенов{mask_info}")
+            mask_info = f", includes mask: {'yes' if mask_tokens else 'no'}" if split == "train" else ""
+            lines.append(f"  {name}: {tokens / 1e6:.1f}M tokens{mask_info}")
     return "\n".join(lines)
 
 

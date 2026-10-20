@@ -3,8 +3,6 @@ import torch.nn as nn
 
 
 class RMSNorm(nn.Module):
-    """Root Mean Square Layer Normalization: дешевле LayerNorm, стандарт современных LLM."""
-
     def __init__(self, dim, eps=1e-5):
         super().__init__()
         self.eps = eps

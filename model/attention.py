@@ -22,10 +22,6 @@ class MultiHeadAttention(nn.Module):
         self.rope = RoPE(self.head_dim, cfg.rope_theta)
 
     def forward(self, x, cache=None):
-        """x: (batch, seq, d_model). cache: (k, v) прошлых шагов или None.
-
-        Возвращает (выход, новая пара (k, v)).
-        """
         batch_size, seq_len, _ = x.shape
 
         qkv = self.qkv_proj(x)
@@ -40,8 +36,6 @@ class MultiHeadAttention(nn.Module):
             k = torch.cat([cache[0], k], dim=2)
             v = torch.cat([cache[1], v], dim=2)
 
-        # is_causal корректен, когда запросов столько же, сколько ключей (префилл).
-        # При генерации по одному токену маска не нужна: все ключи уже в прошлом.
         attn_output = F.scaled_dot_product_attention(
             q, k, v,
             is_causal=(seq_len == k.shape[2]),
@@ -59,6 +53,6 @@ if __name__ == "__main__":
     attn = MultiHeadAttention(cfg)
     dummy_input = torch.randn(4, cfg.context_length, cfg.d_model)
     output, cache = attn(dummy_input)
-    print("Входной shape:", dummy_input.shape)
-    print("Выходной shape:", output.shape)
-    print("KV-кэш:", cache[0].shape, cache[1].shape)
+    print("Input shape:", dummy_input.shape)
+    print("Output shape:", output.shape)
+    print("KV cache:", cache[0].shape, cache[1].shape)

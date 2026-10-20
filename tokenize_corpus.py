@@ -1,16 +1,3 @@
-"""Токенизация корпуса: data/corpus/*.jsonl -> шарды uint16 в data/tokenized.
-
-Раскладка:
-    data/tokenized/train/<источник>/shard_XXXX.bin        — токены uint16
-    data/tokenized/train/<источник>/shard_XXXX.mask.bin   — только для чатов: 1 = ответ ассистента
-    data/tokenized/val/<источник>/...                     — отложенная валидация
-
-Для каждого источника первые VAL_SKIP_TOKENS токенов пропускаются,
-следующие VAL_TOKENS_PER_SOURCE уходят в валидацию, остальное — в обучение.
-
-Запуск: python tokenize_corpus.py --source all
-"""
-
 import argparse
 import json
 import os
@@ -65,12 +52,10 @@ class ShardWriter:
     def close(self):
         if len(self.pending) > 0:
             self._write_shard(len(self.pending))
-        print(f"  {self.out_dir}: {self.total_tokens / 1e6:.1f}M токенов, шардов: {self.index}")
+        print(f"  {self.out_dir}: {self.total_tokens / 1e6:.1f}M tokens, shards: {self.index}")
 
 
 class Router:
-    """Детерминированно разводит поток токенов источника на валидацию и обучение."""
-
     def __init__(self, train_writer, val_writer, val_skip, val_tokens):
         self.train = train_writer
         self.val = val_writer
@@ -134,7 +119,7 @@ def process_source(source_name, jsonl_path, router, tokenizer, dry_run_docs=0):
             if len(pending_texts) >= ENCODE_BATCH:
                 flush()
                 if count % 50000 < ENCODE_BATCH:
-                    print(f"  ... {count} записей, всего токенов: {router.seen / 1e6:.1f}M")
+                    print(f"  ... {count} records, total tokens: {router.seen / 1e6:.1f}M")
             if dry_run_docs and count >= dry_run_docs:
                 break
     flush()
@@ -149,7 +134,7 @@ def main():
     parser.add_argument("--tokenizer", default=TOKENIZER_PATH)
     parser.add_argument("--val-skip", type=int, default=VAL_SKIP_TOKENS)
     parser.add_argument("--val-tokens", type=int, default=VAL_TOKENS_PER_SOURCE)
-    parser.add_argument("--dry-run", type=int, default=0, help="взять только N записей каждого источника")
+    parser.add_argument("--dry-run", type=int, default=0, help="take only N records from each source")
     args = parser.parse_args()
 
     tokenizer = Tokenizer.from_file(args.tokenizer)
@@ -160,10 +145,10 @@ def main():
         file_name, kind = FILES[name]
         path = os.path.join(args.corpus_dir, file_name)
         if not os.path.exists(path):
-            print(f"Пропускаю {name}: нет файла {path}")
+            print(f"Skipping {name}: file not found {path}")
             continue
 
-        print(f"=== токенизирую {name} ===")
+        print(f"=== tokenizing {name} ===")
         with_mask = kind == "chat"
         train_writer = ShardWriter(os.path.join(args.out_dir, "train", name), with_mask)
         val_writer = ShardWriter(os.path.join(args.out_dir, "val", name), with_mask)
@@ -171,13 +156,12 @@ def main():
         count = process_source(name, path, router, tokenizer, args.dry_run)
         train_writer.close()
         val_writer.close()
-        print(f"  Записей обработано: {count}")
+        print(f"  Records processed: {count}")
 
-    # пример декодирования — глазами проверить, что всё осмысленно
     sample_path = os.path.join(args.out_dir, "train", sources[0], "shard_0000.bin")
     if os.path.exists(sample_path):
         ids = np.fromfile(sample_path, dtype=np.uint16)[:200].tolist()
-        print("\nПример из", sample_path, ":")
+        print("\nSample from", sample_path, ":")
         print(tokenizer.decode(ids, skip_special_tokens=False)[:500])
 
 

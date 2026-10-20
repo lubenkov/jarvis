@@ -7,8 +7,6 @@ from model.norm import RMSNorm
 
 
 class SwiGLU(nn.Module):
-    """Feed-forward с gated-активацией: лучше обычного MLP при том же числе параметров."""
-
     def __init__(self, cfg: ModelConfig):
         super().__init__()
         self.gate = nn.Linear(cfg.d_model, cfg.d_ff, bias=False)
@@ -21,8 +19,6 @@ class SwiGLU(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    """Pre-norm блок: x + attention(norm(x)), x + ffn(norm(x))."""
-
     def __init__(self, cfg: ModelConfig):
         super().__init__()
         self.ln1 = RMSNorm(cfg.d_model, cfg.norm_eps)
@@ -44,5 +40,5 @@ if __name__ == "__main__":
     block = TransformerBlock(cfg)
     dummy_input = torch.randn(4, cfg.context_length, cfg.d_model)
     output, cache = block(dummy_input)
-    print("Входной shape:", dummy_input.shape)
-    print("Выходной shape:", output.shape)
+    print("Input shape:", dummy_input.shape)
+    print("Output shape:", output.shape)

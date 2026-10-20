@@ -16,8 +16,6 @@ def _init_weights(module):
 
 
 class TransformerLM(nn.Module):
-    """GPT-подобная модель: RoPE, RMSNorm, SwiGLU, tied embeddings, без bias."""
-
     def __init__(self, cfg: ModelConfig = None):
         super().__init__()
         cfg = cfg or MODEL_PRESETS["main"]
@@ -31,12 +29,11 @@ class TransformerLM(nn.Module):
         self.ln_final = RMSNorm(cfg.d_model, cfg.norm_eps)
         self.lm_head = nn.Linear(cfg.d_model, cfg.vocab_size, bias=False)
 
-        self.lm_head.weight = self.token_embedding.weight  # tied embeddings
+        self.lm_head.weight = self.token_embedding.weight
 
         self.apply(_init_weights)
 
     def forward(self, idx, caches=None, use_cache=False):
-        """idx: (batch, seq). Возвращает logits, а при use_cache=True — (logits, новые caches)."""
         x = self.dropout(self.token_embedding(idx))
 
         new_caches = [] if use_cache else None
@@ -65,12 +62,11 @@ if __name__ == "__main__":
         dummy_input = torch.randint(0, cfg.vocab_size, (4, cfg.context_length))
         output = model(dummy_input)
         n_params = model.n_params()
-        print(f"--- пресет {name} ---")
-        print("Входной shape:", dummy_input.shape)
-        print("Выходной shape:", output.shape)
-        print(f"Параметров: {n_params / 1e6:.1f}M (без эмбеддингов: {model.n_params(True) / 1e6:.1f}M)")
+        print(f"--- preset {name} ---")
+        print("Input shape:", dummy_input.shape)
+        print("Output shape:", output.shape)
+        print(f"Parameters: {n_params / 1e6:.1f}M (non-embedding: {model.n_params(True) / 1e6:.1f}M)")
 
-    # Проверка эквивалентности генерации с KV-кэшем и без него
     cfg = MODEL_PRESETS["dev"]
     model = TransformerLM(cfg)
     model.eval()
@@ -86,6 +82,6 @@ if __name__ == "__main__":
     incremental_logits = torch.cat(step_logits, dim=1)
 
     diff = (full_logits - incremental_logits).abs().max().item()
-    print("Максимальное расхождение KV-кэш vs полный проход:", diff)
-    assert diff < 1e-5, "KV-кэш работает некорректно"
+    print("Max difference KV cache vs full pass:", diff)
+    assert diff < 1e-5, "KV cache is incorrect"
     print("OK")

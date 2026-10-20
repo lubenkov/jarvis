@@ -1,11 +1,3 @@
-"""Самопроверка всего пайплайна на синтетических данных, без интернета.
-
-Проверяет: модель и KV-кэш -> синтетический корпус -> токенизатор -> шарды ->
-обучение (пресет dev) -> resume -> генерацию.
-
-Запуск: python selftest.py
-"""
-
 import json
 import os
 import random
@@ -30,19 +22,12 @@ def run(cmd, cwd):
     if result.returncode != 0:
         print(result.stdout[-3000:])
         print(result.stderr[-3000:])
-        raise SystemExit(f"Команда упала с кодом {result.returncode}: {cmd}")
+        raise SystemExit(f"Command failed with exit code {result.returncode}: {cmd}")
     return result.stdout
 
 
 def build_corpus(corpus_dir, rng):
     os.makedirs(corpus_dir, exist_ok=True)
-
-    # Размеры корпуса подобраны с большим запасом: после резервирования валидации
-    # (--val-skip 2000 + --val-tokens 6000 токенов на источник, см. шаг 3 ниже)
-    # в train-сплите КАЖДОГО источника обязан остаться шард длиннее окна dev-пресета
-    # (context_length + 2 = 514 токенов) — иначе dataset.py честно упадёт с
-    # «Все шарды источника короче окна». При 300/150/220 документах в train оставалось
-    # 64 (chat) и 161 (texts) токена, и селфтест детерминированно падал на претрейне.
 
     def sentence(n):
         return " ".join(rng.choice(WORDS) for _ in range(n)).capitalize() + "."
@@ -92,10 +77,9 @@ def main():
     out_dir = os.path.join(work, "checkpoints")
     tokenizer_path = os.path.join(work, "tokenizer.json")
     rng = random.Random(1234)
-    print("Временная папка:", work)
+    print("Work dir:", work)
 
     try:
-        # 1. модель и KV-кэш
         from dataclasses import replace
 
         from model.config import MODEL_PRESETS
@@ -114,10 +98,9 @@ def main():
                 logits_t, caches = model(ids[:, t:t + 1], caches=caches, use_cache=True)
                 parts.append(logits_t)
             diff = (full - torch.cat(parts, dim=1)).abs().max().item()
-        assert diff < 1e-4, "KV-кэш работает некорректно"
-        print(f"  модель и KV-кэш: ok (расхождение {diff:.2e})")
+        assert diff < 1e-4, "KV cache is incorrect"
+        print(f"  model and KV cache: ok (diff {diff:.2e})")
 
-        # 2. синтетический корпус и токенизатор
         build_corpus(corpus_dir, rng)
         tokenizer = train_tiny_tokenizer(corpus_dir, tokenizer_path)
         from tokenizers import Tokenizer
@@ -128,16 +111,14 @@ def main():
             {"role": "user", "content": "привет"},
             {"role": "assistant", "content": "привет как дела"},
         ])
-        assert conv_ids and any(conv_mask) and not conv_mask[0], "маска лосса построена неверно"
-        print(f"  токенизатор: {tokenizer.get_vocab_size()} токенов, формат диалога: ok")
+        assert conv_ids and any(conv_mask) and not conv_mask[0], "loss mask is incorrect"
+        print(f"  tokenizer: {tokenizer.get_vocab_size()} tokens, dialogue format: ok")
 
-        # 3. токенизация корпуса
         run([sys.executable, os.path.join(ROOT, "tokenize_corpus.py"), "--source", "all",
              "--corpus-dir", corpus_dir, "--out-dir", tokenized_dir, "--tokenizer", tokenizer_path,
              "--val-skip", "2000", "--val-tokens", "6000"], cwd=ROOT)
-        print("  токенизация: ok")
+        print("  tokenization: ok")
 
-        # 4. немного обучения
         with open(os.path.join(work, "golden_prompts.json"), "w", encoding="utf-8") as f:
             json.dump([{"messages": [{"role": "user", "content": "привет"}]},
                        {"messages": [{"role": "user", "content": "расскажи шутку"}]}], f, ensure_ascii=False)
@@ -152,18 +133,16 @@ def main():
             "--val-batch", "2", "--val-count", "2", "--peak-lr", "3e-3", "--seed", "1",
         ]
         output = run(train_cmd, cwd=work)
-        assert "Остановка" in output, "обучение завершилось нештатно"
+        assert "Stopped:" in output, "training did not finish normally"
         assert os.path.exists(os.path.join(out_dir, "latest.pt"))
         assert os.path.exists(os.path.join(out_dir, "inference.pt"))
-        print("  обучение: ok")
+        print("  training: ok")
 
-        # 5. resume
         train_cmd[train_cmd.index("--max-tokens") + 1] = "150000"
         output = run(train_cmd, cwd=work)
-        assert "Продолжаю с" in output, "resume не сработал"
+        assert "Resuming from" in output, "resume did not work"
         print("  resume: ok")
 
-        # 6. SFT после pretrain: счётчики фазы должны начинаться с нуля и обучение идти
         sft_dir = os.path.join(work, "sft")
         sft_cmd = [
             sys.executable, os.path.join(ROOT, "train.py"),
@@ -176,15 +155,14 @@ def main():
             "--val-batch", "2", "--val-count", "2", "--peak-lr", "3e-4", "--seed", "1",
         ]
         output = run(sft_cmd, cwd=work)
-        assert "Продолжаю с" in output and "этап завершён" in output, \
-            "SFT после pretrain завершился нештатно"
+        assert "Resuming from" in output and "phase complete" in output, \
+            "SFT after pretrain did not finish normally"
         with open(os.path.join(sft_dir, "metrics.jsonl"), encoding="utf-8") as f:
             sft_records = [json.loads(line) for line in f if line.strip()]
         assert sft_records[-1].get("done") and sft_records[-1].get("phase_tokens", 0) > 0, \
-            "SFT после pretrain не обучил ни одного токена фазы"
-        print("  SFT после pretrain: ok")
+            "SFT after pretrain did not train any phase tokens"
+        print("  SFT after pretrain: ok")
 
-        # 7. генерация
         from chat_format import build_prompt, stop_ids
         from generate import generate_ids, load_model
 
@@ -193,10 +171,10 @@ def main():
         prompt_ids = build_prompt(tokenizer, [{"role": "user", "content": "привет"}])
         out_ids = generate_ids(model, prompt_ids, max_new_tokens=16, temperature=0.8,
                                top_p=0.95, stop_token_ids=stop_ids(tokenizer))
-        assert out_ids.shape[1] > len(prompt_ids), "модель ничего не сгенерировала"
-        print("  генерация: ok")
+        assert out_ids.shape[1] > len(prompt_ids), "model generated nothing"
+        print("  generation: ok")
 
-        print("\nВСЁ ОК")
+        print("\nALL OK")
     finally:
         if "--keep" not in sys.argv:
             import shutil
