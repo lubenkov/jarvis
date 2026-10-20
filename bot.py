@@ -269,8 +269,6 @@ def main():
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
         parser.error("TELEGRAM_BOT_TOKEN is missing: put the token in .env (see .env.example)")
-    print("Whitelist disabled: anyone who knows the username can use the bot. "
-          "Protection is provided by limits and min-interval.")
     run_telegram(jarvis, token)
 
 
