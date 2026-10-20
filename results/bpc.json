@@ -1,0 +1,111 @@
+{
+  "config": {
+    "chars": 600000,
+    "batch": 2,
+    "baseline": "ai-forever/rugpt3small_based_on_gpt2",
+    "tokenizer": "tokenizer.json"
+  },
+  "systems": {
+    "pretrain": {
+      "web_ru": {
+        "bits_per_token": 4.427286674246483,
+        "chars_per_token": 3.7544584193730053,
+        "bpc": 1.1792078056855508,
+        "ppl": 21.515234719043818,
+        "tokens": 159810,
+        "chars": 600000,
+        "seconds": 208.8
+      },
+      "texts_ru": {
+        "bits_per_token": 4.159595468973656,
+        "chars_per_token": 4.095171792456694,
+        "bpc": 1.015731617568677,
+        "ppl": 17.8715823230542,
+        "tokens": 146514,
+        "chars": 600000,
+        "seconds": 237.3
+      },
+      "chat_ru": {
+        "bits_per_token": 3.3396934349076277,
+        "chars_per_token": 3.6433411867576693,
+        "bpc": 0.9166567893905462,
+        "ppl": 10.123901247522252,
+        "tokens": 164684,
+        "chars": 600000,
+        "seconds": 267.1
+      }
+    },
+    "sft": {
+      "web_ru": {
+        "bits_per_token": 4.576225458465447,
+        "chars_per_token": 3.7544584193730053,
+        "bpc": 1.2188776508622718,
+        "ppl": 23.855093873758022,
+        "tokens": 159810,
+        "chars": 600000,
+        "seconds": 267.6
+      },
+      "texts_ru": {
+        "bits_per_token": 4.382270808014384,
+        "chars_per_token": 4.095171792456694,
+        "bpc": 1.0701067086090326,
+        "ppl": 20.854268573261745,
+        "tokens": 146514,
+        "chars": 600000,
+        "seconds": 212.8
+      },
+      "chat_ru": {
+        "bits_per_token": 3.3284839907826194,
+        "chars_per_token": 3.6433411867576693,
+        "bpc": 0.9135800958967415,
+        "ppl": 10.04554541293323,
+        "tokens": 164684,
+        "chars": 600000,
+        "seconds": 236.3
+      }
+    },
+    "rugpt3small_based_on_gpt2": {
+      "web_ru": {
+        "bits_per_token": 4.6275540120081455,
+        "chars_per_token": 4.337704775812958,
+        "bpc": 1.0668208767483178,
+        "ppl": 24.71909486219957,
+        "tokens": 138322,
+        "chars": 600000,
+        "seconds": 258.8
+      },
+      "texts_ru": {
+        "bits_per_token": 4.42969352540853,
+        "chars_per_token": 4.765270707086752,
+        "bpc": 0.9295785691295224,
+        "ppl": 21.55115858784385,
+        "tokens": 125911,
+        "chars": 600000,
+        "seconds": 301.7
+      },
+      "chat_ru": {
+        "bits_per_token": 3.7346170215421344,
+        "chars_per_token": 3.8062371539496054,
+        "bpc": 0.9811834813463599,
+        "ppl": 13.3116455710445,
+        "tokens": 157636,
+        "chars": 600000,
+        "seconds": 238.8
+      }
+    }
+  },
+  "compression": {
+    "web_ru": {
+      "gzip": 4.11776,
+      "xz": 3.08208
+    },
+    "texts_ru": {
+      "gzip": 4.116546666666666,
+      "xz": 3.00784
+    },
+    "chat_ru": {
+      "gzip": 3.6568933333333336,
+      "xz": 2.7376
+    }
+  }
+}
