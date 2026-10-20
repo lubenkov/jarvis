@@ -54,10 +54,8 @@ def _make_scaler(enabled):
 
 
 def _torch_load(path, map_location):
-    try:
-        return torch.load(path, map_location=map_location, weights_only=False)
-    except TypeError:
-        return torch.load(path, map_location=map_location)
+    # weights_only=True: never unpickle arbitrary objects from a checkpoint file
+    return torch.load(path, map_location=map_location, weights_only=True)
 
 
 def _set_lr(optimizer, lr):

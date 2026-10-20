@@ -11,10 +11,9 @@ from model.transformer import TransformerLM
 
 
 def load_model(path, device, dtype=None):
-    try:
-        state = torch.load(path, map_location="cpu", weights_only=False)
-    except TypeError:
-        state = torch.load(path, map_location="cpu")
+    # weights_only=True: a .pt file is a pickle, so an untrusted checkpoint could run
+    # arbitrary code during deserialization. Our format (tensors + plain dicts) loads fine.
+    state = torch.load(path, map_location="cpu", weights_only=True)
     if isinstance(state, dict) and "model" in state:
         cfg_dict = state.get("model_config")
         model_cfg = MODEL_PRESETS["main"] if cfg_dict is None else ModelConfig(**cfg_dict)
