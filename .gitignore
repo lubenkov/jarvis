@@ -17,5 +17,11 @@ data/
 
 .env
 kaggle.json
+*.zip
+
+.hf-cache/
 
 .secrets/
+
+MODEL_CARD.md
+tools/upload_hf.py
