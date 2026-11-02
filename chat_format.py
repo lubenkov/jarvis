@@ -1,10 +1,12 @@
+import os
 from typing import Dict, List, Optional, Tuple
 
 EOS_TOKEN = "<|endoftext|>"
+SYSTEM_TOKEN = "<|system|>"
 USER_TOKEN = "<|user|>"
 ASSISTANT_TOKEN = "<|assistant|>"
 PAD_TOKEN = "<|pad|>"
-SPECIAL_TOKENS = [EOS_TOKEN, USER_TOKEN, ASSISTANT_TOKEN, PAD_TOKEN]
+SPECIAL_TOKENS = [EOS_TOKEN, SYSTEM_TOKEN, USER_TOKEN, ASSISTANT_TOKEN, PAD_TOKEN]
 
 
 ROLE_ALIASES = {
@@ -29,14 +31,22 @@ def check_tokenizer(tokenizer, verbose=True):
 def special_ids(tokenizer) -> Dict[str, int]:
     check_tokenizer(tokenizer, verbose=False)
     return {name: tokenizer.token_to_id(tok) for name, tok in (
-        ("eos", EOS_TOKEN), ("user", USER_TOKEN), ("assistant", ASSISTANT_TOKEN), ("pad", PAD_TOKEN))}
+        ("eos", EOS_TOKEN), ("system", SYSTEM_TOKEN), ("user", USER_TOKEN),
+        ("assistant", ASSISTANT_TOKEN), ("pad", PAD_TOKEN))}
 
 
 def normalize_role(role) -> Optional[str]:
     return ROLE_ALIASES.get(str(role).strip().lower())
 
 
-def prepare_messages(messages: List[dict], min_messages: int = 2) -> List[Tuple[str, str]]:
+def prepare_messages(messages: List[dict], min_messages: int = 2,
+                     keep_system: bool = False) -> List[Tuple[str, str]]:
+    """Normalize a raw message list into (role, content) pairs.
+
+    With keep_system=False (default, v1 behaviour) system prompts are merged into
+    the first user turn. With keep_system=True they stay a separate first turn and
+    are rendered as a <|system|> segment.
+    """
     out: List[Tuple[str, str]] = []
     system_prefix: List[str] = []
 
@@ -57,7 +67,7 @@ def prepare_messages(messages: List[dict], min_messages: int = 2) -> List[Tuple[
             continue
         if not out and role == "assistant":
             continue
-        if not out and role == "user" and system_prefix:
+        if not out and role == "user" and system_prefix and not keep_system:
             content = "\n\n".join(system_prefix + [content])
             system_prefix = []
         if out and out[-1][0] == role:
@@ -67,12 +77,18 @@ def prepare_messages(messages: List[dict], min_messages: int = 2) -> List[Tuple[
 
     if len(out) < min_messages:
         return []
+    if keep_system and system_prefix:
+        return [("system", "\n\n".join(system_prefix))] + out
     return out
 
 
 def format_conversation(messages: List[Tuple[str, str]], add_eos=True) -> str:
     parts = []
     for role, content in messages:
+        if role == "system":
+            parts.append(SYSTEM_TOKEN)
+            parts.append(content)
+            continue
         parts.append(USER_TOKEN if role == "user" else ASSISTANT_TOKEN)
         parts.append(content)
         if role == "assistant" and add_eos:
@@ -100,8 +116,10 @@ def conversation_mask(ids: List[int], tokenizer) -> List[int]:
 
 
 def encode_conversation(tokenizer, messages: List[dict], add_eos=True,
-                        min_messages: int = 2) -> Tuple[List[int], List[int]]:
-    prepared = prepare_messages(messages, min_messages=min_messages)
+                        min_messages: int = 2, system_prompt: str = "") -> Tuple[List[int], List[int]]:
+    if system_prompt:
+        messages = [{"role": "system", "content": system_prompt}] + list(messages or [])
+    prepared = prepare_messages(messages, min_messages=min_messages, keep_system=bool(system_prompt))
     if not prepared:
         return [], []
     text = format_conversation(prepared, add_eos=add_eos)
@@ -109,8 +127,9 @@ def encode_conversation(tokenizer, messages: List[dict], add_eos=True,
     return ids, conversation_mask(ids, tokenizer)
 
 
-def build_prompt(tokenizer, messages: List[dict]) -> List[int]:
-    ids, _ = encode_conversation(tokenizer, messages, add_eos=True, min_messages=1)
+def build_prompt(tokenizer, messages: List[dict], system_prompt: str = "") -> List[int]:
+    ids, _ = encode_conversation(tokenizer, messages, add_eos=True, min_messages=1,
+                                 system_prompt=system_prompt)
     ids.append(tokenizer.token_to_id(ASSISTANT_TOKEN))
     return ids
 
@@ -148,6 +167,11 @@ def decode_ids(tokenizer, ids: List[int]) -> str:
 def stop_ids(tokenizer) -> List[int]:
     ids_map = special_ids(tokenizer)
     return [ids_map["eos"], ids_map["user"]]
+
+
+def resolve_system_prompt(cli_value: str = "") -> str:
+    """--system wins, then the JARVIS_SYSTEM_PROMPT env var; empty disables it."""
+    return (cli_value or os.environ.get("JARVIS_SYSTEM_PROMPT", "")).strip()
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # jarvis
 
-A 112M-parameter GPT-style language model for Russian, implemented from scratch in PyTorch — with a custom BPE tokenizer, a two-stage training pipeline and local inference.
+A 138M-parameter GPT-style language model for Russian, implemented from scratch in PyTorch — with a custom BPE tokenizer, a two-stage training pipeline and local inference.
 
 ![Status](https://img.shields.io/badge/status-work%20in%20progress-yellow?style=flat-square)
 ![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?style=flat-square&logo=python&logoColor=white)
@@ -16,7 +16,7 @@ A 112M-parameter GPT-style language model for Russian, implemented from scratch 
 
 | Component | What it includes |
 | :-- | :-- |
-| Model | 14-layer causal Transformer with RoPE, RMSNorm, SwiGLU, tied input/output embeddings and PyTorch scaled-dot-product attention |
+| Model | 16-layer causal Transformer with RoPE, RMSNorm, SwiGLU, tied input/output embeddings and PyTorch scaled-dot-product attention |
 | Tokenizer | Custom byte-level BPE tokenizer with a 16,384-token vocabulary and role/end-of-turn tokens |
 | Training | Pretraining followed by supervised fine-tuning (SFT); mixed-source data, assistant-only loss masks for chat examples, validation and sample generation |
 | Training runtime | Automatic mixed precision, multi-GPU DDP, time-limited sessions, periodic checkpoints and resume support |
@@ -31,17 +31,18 @@ The default `main` preset is configured as follows:
 | Parameter | Value |
 | :-- | :-- |
 | Architecture | Decoder-only autoregressive Transformer |
-| Parameters | Approximately 111.7M (about 112M) |
-| Layers | 14 |
+| Parameters | Approximately 138.4M |
+| Layers | 16 |
 | Attention heads | 12 |
 | Hidden size | 768 |
 | Feed-forward size | 2,048 |
-| Context length | 768 tokens |
-| Vocabulary | 16,384 tokens |
+| Context length | 1,024 tokens |
+| Vocabulary | 32,768 tokens |
 | Position encoding | RoPE |
 | Normalization / MLP | RMSNorm / SwiGLU |
+| Initialisation | depth-scaled residual projections |
 
-Chat examples use the special tokens `<|user|>`, `<|assistant|>` and `<|endoftext|>`; `<|pad|>` is also reserved by the tokenizer. For dialogue SFT, the loss is applied to assistant responses rather than user messages.
+Chat examples use the special tokens `<|system|>`, `<|user|>`, `<|assistant|>` and `<|endoftext|>`; `<|pad|>` is also reserved by the tokenizer. For dialogue SFT, the loss is applied to assistant responses rather than user messages. The system prompt is optional and never hardcoded: it comes from `--system` or `JARVIS_SYSTEM_PROMPT`, and about half of the training dialogues carry it, so the model works both with and without it.
 
 ## Get started
 
@@ -90,7 +91,7 @@ python generate.py \
   --prompt "Привет! Расскажи короткую историю."
 ```
 
-In `chat.py`, enter `exit` to quit, `/reset` to clear the conversation and `/temp 0.7` to change the sampling temperature. CUDA is selected automatically when available; CPU inference is supported but slower.
+In `chat.py`, enter `exit` to quit, `/reset` to clear the conversation and `/temp 0.7` to change the sampling temperature. CUDA is selected automatically when available; CPU inference is supported but slower. Pass `--system "..."` (or set `JARVIS_SYSTEM_PROMPT`) to prepend a system prompt; without it the model is prompted exactly as before.
 
 ## Prepare data and train
 
@@ -105,6 +106,22 @@ python prepare_data.py --what all
 python train_tokenizer.py
 python tokenize_corpus.py --source all
 ```
+
+The v2 corpus is built with the streaming helper instead, because a 4B-token
+dump does not fit on a 20 GB disk: it filters and tokenizes in one pass and
+writes only the uint16 shards.
+
+```bash
+python prepare_data.py --what web --max-web-docs 30000 --out-dir data/corpus
+python prepare_data.py --what chats --out-dir data/corpus
+python train_tokenizer.py --corpus-dir data/corpus --max-chars 400000000 --text-share 0.75
+python prepare_stream.py --source web   --target-tokens 4.2e9 --web-shard-stride 40
+python prepare_stream.py --source wiki  --target-tokens 2e8
+python prepare_stream.py --source texts --target-tokens 1.5e8
+python tokenize_corpus.py --source chat_ru --system-prob 0.5
+```
+
+`system_prompts.txt` is not committed: it holds the actual prompt used for training and inference. Copy `system_prompts.example.txt` to get started.
 
 Train the two phases:
 
@@ -127,10 +144,11 @@ The checked-in defaults target 1.2B tokens for pretraining and 150M for SFT. Tra
 | Source | Dataset(s) | Use |
 | :-- | :-- | :-- |
 | `web_ru` | [FineWeb-2](https://huggingface.co/datasets/HuggingFaceFW/fineweb-2), Russian Cyrillic training shards | Russian web text |
+| `wiki_ru` | [Wikimedia Wikipedia](https://huggingface.co/datasets/wikimedia/wikipedia) (`20231101.ru`) | Encyclopedic text |
 | `texts_ru` | [Gazeta](https://huggingface.co/datasets/IlyaGusev/gazeta) | News articles |
 | `chat_ru` | [Saiga Scored](https://huggingface.co/datasets/IlyaGusev/saiga_scored), [GrandMaster-PRO-MAX](https://huggingface.co/datasets/Vikhrmodels/GrandMaster-PRO-MAX), [Veles-2.5](https://huggingface.co/datasets/Vikhrmodels/Veles-2.5), [Russian Instructions](https://huggingface.co/datasets/Den4ikAI/russian_instructions_2), [Jokes Dialogues](https://huggingface.co/datasets/inkoziev/jokes_dialogues) and the Russian subset of [OpenAssistant/oasst1](https://huggingface.co/datasets/OpenAssistant/oasst1) | Dialogue and instruction examples |
 
-The configured pretraining mixture is 68% web, 27% chat and 5% articles. SFT uses 95% chat and 5% web. These are source-sampling weights in the training configuration, not guarantees about the size of the underlying datasets. Dataset revisions are not pinned by the preparation script; review each source's terms and card before using or redistributing derived artifacts.
+The configured pretraining mixture is 88% web, 5% chat, 4% wiki and 3% articles. SFT uses 95% chat and 5% web. These are source-sampling weights in the training configuration, not guarantees about the size of the underlying datasets. Dataset revisions are not pinned by the preparation script; review each source's terms and card before using or redistributing derived artifacts.
 
 ## Telegram bot
 
@@ -168,12 +186,15 @@ python selftest.py
 
 It builds a synthetic corpus and exercises the model/KV cache, tokenizer, data pipeline, a tiny pretraining run, checkpoint resume, the pretrain-to-SFT transition and generation. It does not download the training corpora or require the published checkpoint.
 
+`python tools/check_pipeline.py` is a faster, download-free check of the shard writer, the train/validation offset split and the streaming corpus builder.
+
 ## How the code is organised
 
 | File / directory | Responsibility |
 | :-- | :-- |
 | `model/` | Transformer configuration, attention, RoPE, RMSNorm, SwiGLU blocks and model |
 | `prepare_data.py` | Download, filter, normalize and deduplicate source corpora |
+| `prepare_stream.py` | Stream, filter and tokenize web/wiki/news in one pass (no JSONL dump) |
 | `train_tokenizer.py` | Train the byte-level BPE tokenizer |
 | `tokenize_corpus.py` | Encode corpora and write train/validation shards |
 | `dataset.py` | Stream token windows and assistant-response masks |

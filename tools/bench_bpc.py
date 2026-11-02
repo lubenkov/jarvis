@@ -100,6 +100,11 @@ def main():
     parser.add_argument("--chars", type=int, default=600_000)
     parser.add_argument("--batch", type=int, default=2)
     parser.add_argument("--tokenized-dir", default=TOKENIZED_DIR)
+    parser.add_argument("--text-dir", default="",
+                        help="directory with {source}.txt samples; use it to score several "
+                             "models on byte-identical text")
+    parser.add_argument("--context", type=int, default=0,
+                        help="force the same window length for every model (0 = model context)")
     parser.add_argument("--tokenizer", default=TOKENIZER_PATH)
     parser.add_argument("--device", default=None)
     parser.add_argument("--out", default="results/bpc.json")
@@ -114,8 +119,13 @@ def main():
     sources = [s.strip() for s in args.sources.split(",") if s.strip()]
     texts = {}
     for source in sources:
-        ids = load_val_ids(args.tokenized_dir, source)
-        text = decode_ids(tokenizer, ids.tolist())[:args.chars]
+        text_path = os.path.join(args.text_dir, f"{source}.txt") if args.text_dir else ""
+        if text_path and os.path.exists(text_path):
+            with open(text_path, encoding="utf-8") as f:
+                text = f.read()[:args.chars]
+        else:
+            ids = load_val_ids(args.tokenized_dir, source)
+            text = decode_ids(tokenizer, ids.tolist())[:args.chars]
         if len(text) < 1000:
             raise ValueError(f"Text too short for '{source}': {len(text)} chars")
         texts[source] = text
@@ -142,7 +152,8 @@ def main():
             text = texts[source]
             ids = np.array(tokenizer.encode(text, add_special_tokens=False).ids, dtype=np.int64)
             started = time.time()
-            nats, tokens = total_nats(model, ids, cfg.context_length, args.batch, device, f"{name}/{source}")
+            ctx = args.context or cfg.context_length
+            nats, tokens = total_nats(model, ids, ctx, args.batch, device, f"{name}/{source}")
             rows[source] = score(nats, tokens, len(text))
             rows[source]["seconds"] = round(time.time() - started, 1)
             print(f"  {source}: {rows[source]['bpc']:.3f} bits/char "
@@ -168,6 +179,7 @@ def main():
             ctx = getattr(baseline_model.config, "n_positions", None) or \
                 getattr(baseline_model.config, "max_position_embeddings", 1024)
             ctx = min(int(ctx), 1024)
+            ctx = args.context or ctx
             rows = {}
             for source in sources:
                 text = texts[source]

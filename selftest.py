@@ -41,6 +41,9 @@ def build_corpus(corpus_dir, rng):
     with open(os.path.join(corpus_dir, "texts_ru.jsonl"), "w", encoding="utf-8") as f:
         for _ in range(900):
             f.write(json.dumps({"text": paragraph()}, ensure_ascii=False) + "\n")
+    with open(os.path.join(corpus_dir, "wiki_ru.jsonl"), "w", encoding="utf-8") as f:
+        for _ in range(600):
+            f.write(json.dumps({"text": paragraph()}, ensure_ascii=False) + "\n")
     with open(os.path.join(corpus_dir, "chat_ru.jsonl"), "w", encoding="utf-8") as f:
         for _ in range(2200):
             messages = []
@@ -51,16 +54,9 @@ def build_corpus(corpus_dir, rng):
 
 
 def train_tiny_tokenizer(corpus_dir, out_path, vocab_size=512):
-    from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
+    from train_tokenizer import build_tokenizer, iter_texts
 
-    from chat_format import SPECIAL_TOKENS
-    from train_tokenizer import iter_texts
-
-    tokenizer = Tokenizer(models.BPE(unk_token="[UNK]"))
-    tokenizer.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
-    tokenizer.decoder = decoders.ByteLevel()
-    trainer = trainers.BpeTrainer(vocab_size=vocab_size, min_frequency=1,
-                                  special_tokens=["[UNK]"] + SPECIAL_TOKENS, show_progress=False)
+    tokenizer, trainer = build_tokenizer(vocab_size, min_frequency=1, show_progress=False)
     tokenizer.train_from_iterator(iter_texts(corpus_dir, 100_000), trainer=trainer)
     tokenizer.save(out_path)
     return tokenizer
@@ -113,6 +109,21 @@ def main():
         ])
         assert conv_ids and any(conv_mask) and not conv_mask[0], "loss mask is incorrect"
         print(f"  tokenizer: {tokenizer.get_vocab_size()} tokens, dialogue format: ok")
+
+        from chat_format import build_prompt
+        system_prompt = "ты джарвис"
+        sys_ids, sys_mask = encode_conversation(tokenizer, [
+            {"role": "user", "content": "привет"},
+            {"role": "assistant", "content": "привет как дела"},
+        ], system_prompt=system_prompt)
+        sys_token = tokenizer.token_to_id("<|system|>")
+        assert sys_token is not None, "<|system|> missing from the tokenizer"
+        assert sys_ids[0] == sys_token, "system prompt is not rendered first"
+        assert not any(sys_mask[:3]) and any(sys_mask), "system prefix leaked into the loss mask"
+        prompt_ids = build_prompt(tokenizer, [{"role": "user", "content": "привет"}],
+                                  system_prompt=system_prompt)
+        assert prompt_ids[0] == sys_token, "build_prompt ignores the system prompt"
+        print("  system prompt: ok")
 
         run([sys.executable, os.path.join(ROOT, "tokenize_corpus.py"), "--source", "all",
              "--corpus-dir", corpus_dir, "--out-dir", tokenized_dir, "--tokenizer", tokenizer_path,

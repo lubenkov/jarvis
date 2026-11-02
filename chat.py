@@ -3,7 +3,8 @@ import argparse
 import torch
 from tokenizers import Tokenizer
 
-from chat_format import build_prompt, check_tokenizer, decode_ids, stop_ids, truncate_messages
+from chat_format import (build_prompt, check_tokenizer, decode_ids, resolve_system_prompt,
+                         stop_ids, truncate_messages)
 from generate import generate_ids, load_model
 from model.config import (MAX_NEW_TOKENS, REPETITION_PENALTY, TEMPERATURE, TOKENIZER_PATH,
                           TOP_K, TOP_P)
@@ -21,6 +22,8 @@ def main():
     parser.add_argument("--top-p", type=float, default=TOP_P)
     parser.add_argument("--rep-penalty", type=float, default=REPETITION_PENALTY)
     parser.add_argument("--max-new", type=int, default=MAX_NEW_TOKENS)
+    parser.add_argument("--system", default="",
+                        help="system prompt; overrides the JARVIS_SYSTEM_PROMPT env var")
     args = parser.parse_args()
 
     device = torch.device(args.device) if args.device else \
@@ -29,9 +32,12 @@ def main():
     check_tokenizer(tokenizer)
     model, model_cfg = load_model(args.ckpt, device)
     stops = stop_ids(tokenizer)
+    system_prompt = resolve_system_prompt(args.system)
     max_prompt_tokens = max(64, model_cfg.context_length - args.max_new)
 
     print(f"Mini Jarvis ready: {args.ckpt} ({model.n_params() / 1e6:.1f}M params, {device.type})")
+    if system_prompt:
+        print(f"System prompt: {system_prompt[:120]}")
     print("Commands: /reset — clear history, /temp X — temperature, exit — quit")
 
     history = []
@@ -62,7 +68,7 @@ def main():
         while len(history) > MAX_HISTORY_MESSAGES:
             history.pop(0)
         messages = truncate_messages(tokenizer, history, max_prompt_tokens)
-        ids = build_prompt(tokenizer, messages)
+        ids = build_prompt(tokenizer, messages, system_prompt=system_prompt)
         if len(ids) > max_prompt_tokens:
             ids = ids[-max_prompt_tokens:]
 

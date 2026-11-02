@@ -25,3 +25,6 @@ kaggle.json
 
 MODEL_CARD.md
 tools/upload_hf.py
+
+# the actual system prompt used for training stays local
+system_prompts.txt

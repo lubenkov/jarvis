@@ -7,7 +7,8 @@ import time
 import torch
 from tokenizers import Tokenizer
 
-from chat_format import build_prompt, check_tokenizer, decode_ids, stop_ids, truncate_messages
+from chat_format import (build_prompt, check_tokenizer, decode_ids, resolve_system_prompt,
+                         stop_ids, truncate_messages)
 from generate import generate_ids, load_model
 from model.config import REPETITION_PENALTY, TEMPERATURE, TOKENIZER_PATH, TOP_K, TOP_P
 
@@ -59,6 +60,7 @@ class Jarvis:
         check_tokenizer(self.tokenizer)
         self.model, cfg = load_model(args.ckpt, self.device)
         self.stops = stop_ids(self.tokenizer)
+        self.system_prompt = resolve_system_prompt(args.system)
         self.max_new = args.max_new
         self.top_k = args.top_k
         self.top_p = args.top_p
@@ -114,7 +116,7 @@ class Jarvis:
         while len(state["history"]) > MAX_HISTORY_MESSAGES:
             state["history"].pop(0)
         messages = truncate_messages(self.tokenizer, state["history"], self.max_prompt_tokens)
-        ids = build_prompt(self.tokenizer, messages)
+        ids = build_prompt(self.tokenizer, messages, system_prompt=self.system_prompt)
         if len(ids) > self.max_prompt_tokens:
             ids = ids[-self.max_prompt_tokens:]
         out = generate_ids(self.model, torch.tensor([ids], dtype=torch.long), max_new_tokens=self.max_new,
@@ -247,6 +249,8 @@ def main():
     parser.add_argument("--max-concurrent", type=positive_int, default=1,
                         help="maximum number of concurrent generations")
     parser.add_argument("--selftest", action="store_true", help="test generation without Telegram")
+    parser.add_argument("--system", default="",
+                        help="system prompt; overrides the JARVIS_SYSTEM_PROMPT env var")
     args = parser.parse_args()
 
     load_env()

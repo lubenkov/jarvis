@@ -4,7 +4,8 @@ import torch
 import torch.nn.functional as F
 from tokenizers import Tokenizer
 
-from chat_format import build_prompt, check_tokenizer, decode_ids, stop_ids
+from chat_format import (build_prompt, check_tokenizer, decode_ids, resolve_system_prompt,
+                         stop_ids)
 from model.config import (MAX_NEW_TOKENS, MODEL_PRESETS, ModelConfig, REPETITION_PENALTY,
                           TEMPERATURE, TOKENIZER_PATH, TOP_K, TOP_P)
 from model.transformer import TransformerLM
@@ -90,6 +91,8 @@ def main():
     parser.add_argument("--top-p", type=float, default=TOP_P)
     parser.add_argument("--rep-penalty", type=float, default=REPETITION_PENALTY)
     parser.add_argument("--device", default=None)
+    parser.add_argument("--system", default="",
+                        help="system prompt; overrides the JARVIS_SYSTEM_PROMPT env var")
     args = parser.parse_args()
 
     device = torch.device(args.device) if args.device else torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -98,7 +101,8 @@ def main():
     model, model_cfg = load_model(args.ckpt, device)
     print(f"Model loaded ({model.n_params() / 1e6:.1f}M params, {device.type})")
 
-    ids = build_prompt(tokenizer, [{"role": "user", "content": args.prompt}])
+    ids = build_prompt(tokenizer, [{"role": "user", "content": args.prompt}],
+                       system_prompt=resolve_system_prompt(args.system))
     max_prompt_tokens = max(8, model_cfg.context_length - args.max_new)
     if len(ids) > max_prompt_tokens:
         ids = ids[-max_prompt_tokens:]
