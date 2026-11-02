@@ -108,23 +108,45 @@ def wiki_texts(stats):
 
 
 def news_texts(stats):
-    from datasets import load_dataset
+    import pyarrow.parquet as pq
+    from huggingface_hub import HfApi, hf_hub_download
 
+    # gazeta is a script-based dataset: `datasets` streaming hangs on it on the
+    # Kaggle runner, so the two parquet files are read directly.
+    files = [f.path for f in HfApi().list_repo_tree(NEWS_REPO, path_in_repo="default/train",
+                                                    repo_type="dataset")
+             if f.path.endswith(".parquet")]
+    files.sort()
     seen = set()
-    dataset = load_dataset(NEWS_REPO, split="train", streaming=True)
-    dataset = dataset.shuffle(seed=42, buffer_size=10_000)
-    for ex in dataset:
-        stats["read"] += 1
-        text = (ex.get("text") or "").strip()
-        if not (300 <= len(text) <= MAX_CHARS) or cyrillic_ratio(text) < 0.5:
-            stats["filtered"] += 1
-            continue
-        key = hashlib.md5(text[:2000].encode("utf-8")).digest()
-        if key in seen:
-            stats["filtered"] += 1
-            continue
-        seen.add(key)
-        yield text
+    work = os.path.join("data", "_news_tmp")
+    os.makedirs(work, exist_ok=True)
+    try:
+        for name in files:
+            print(f"  news file: {os.path.basename(name)}", flush=True)
+            local = hf_hub_download(NEWS_REPO, name, repo_type="dataset", local_dir=work)
+            parquet = None
+            try:
+                parquet = pq.ParquetFile(local)
+                for batch in parquet.iter_batches(batch_size=BATCH_DOCS, columns=["text"]):
+                    for text in batch.column("text").to_pylist():
+                        stats["read"] += 1
+                        text = (text or "").strip()
+                        if not (300 <= len(text) <= MAX_CHARS) or cyrillic_ratio(text) < 0.5:
+                            stats["filtered"] += 1
+                            continue
+                        key = hashlib.md5(text[:2000].encode("utf-8")).digest()
+                        if key in seen:
+                            stats["filtered"] += 1
+                            continue
+                        seen.add(key)
+                        yield text
+            finally:
+                if parquet is not None:
+                    parquet.close()
+                shutil.rmtree(work, ignore_errors=True)
+                os.makedirs(work, exist_ok=True)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def build(source_name, texts, target_tokens, tokenizer, out_dir, val_skip, val_tokens,
