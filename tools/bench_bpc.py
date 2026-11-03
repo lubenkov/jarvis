@@ -14,7 +14,7 @@ import numpy as np
 import torch
 from tokenizers import Tokenizer
 
-from chat_format import check_tokenizer, decode_ids
+from chat_format import ASSISTANT_TOKEN, EOS_TOKEN, USER_TOKEN, check_tokenizer, decode_ids
 from generate import load_model
 from model.config import TOKENIZED_DIR, TOKENIZER_PATH
 
@@ -103,6 +103,9 @@ def main():
     parser.add_argument("--text-dir", default="",
                         help="directory with {source}.txt samples; use it to score several "
                              "models on byte-identical text")
+    parser.add_argument("--dump-texts", default="",
+                        help="write the scored samples to this directory and reuse them "
+                             "for other checkpoints or tokenizers")
     parser.add_argument("--context", type=int, default=0,
                         help="force the same window length for every model (0 = model context)")
     parser.add_argument("--tokenizer", default=TOKENIZER_PATH)
@@ -114,7 +117,8 @@ def main():
     device = torch.device(args.device) if args.device else torch.device("cpu")
     torch.set_num_threads(os.cpu_count() or 4)
     tokenizer = Tokenizer.from_file(args.tokenizer)
-    check_tokenizer(tokenizer)
+    # a v1 tokenizer has no <|system|>, and the benchmark never needs it
+    check_tokenizer(tokenizer, required=[EOS_TOKEN, USER_TOKEN, ASSISTANT_TOKEN])
 
     sources = [s.strip() for s in args.sources.split(",") if s.strip()]
     texts = {}
@@ -129,6 +133,14 @@ def main():
         if len(text) < 1000:
             raise ValueError(f"Text too short for '{source}': {len(text)} chars")
         texts[source] = text
+
+    if args.dump_texts:
+        os.makedirs(args.dump_texts, exist_ok=True)
+        for source, text in texts.items():
+            path = os.path.join(args.dump_texts, f"{source}.txt")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+            print(f"text written: {path} ({len(text)} chars)", flush=True)
 
     payload = {"config": {"chars": args.chars, "batch": args.batch,
                           "baseline": args.baseline, "tokenizer": args.tokenizer},

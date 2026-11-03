@@ -16,8 +16,14 @@ ROLE_ALIASES = {
 }
 
 
-def check_tokenizer(tokenizer, verbose=True):
-    missing = [t for t in SPECIAL_TOKENS if tokenizer.token_to_id(t) is None]
+def check_tokenizer(tokenizer, verbose=True, required=None):
+    """Verify the special tokens this tokenizer is expected to carry.
+
+    Older (v1) tokenizers have no <|system|>, so benchmark tools can pass a
+    narrower ``required`` list instead of rebuilding the checkpoint's tokenizer.
+    """
+    required = SPECIAL_TOKENS if required is None else required
+    missing = [t for t in required if tokenizer.token_to_id(t) is None]
     if missing:
         raise ValueError(
             f"tokenizer.json is missing special tokens {missing}. "

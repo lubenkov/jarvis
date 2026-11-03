@@ -35,6 +35,9 @@ BATCH_DOCS = 2048
 
 DEFAULT_TARGETS = {"web": 4_200_000_000, "wiki": 200_000_000, "texts": 150_000_000}
 
+# the phase mix in model/config.py refers to sources by these names
+SOURCE_NAMES = {"web": "web_ru", "wiki": "wiki_ru", "texts": "texts_ru"}
+
 
 def web_texts(stride, seed, stats):
     import pyarrow.parquet as pq
@@ -151,6 +154,7 @@ def news_texts(stats):
 
 def build(source_name, texts, target_tokens, tokenizer, out_dir, val_skip, val_tokens,
           stats, dry_run_docs=0):
+    source_name = SOURCE_NAMES.get(source_name, source_name)
     free = shutil.disk_usage(out_dir if os.path.isdir(out_dir) else ".").free / 1e9
     print(f"  free disk: {free:.1f} GB, target {target_tokens / 1e9:.2f}B tokens "
           f"(~{target_tokens * 2 / 1e9:.1f} GB of shards)", flush=True)
