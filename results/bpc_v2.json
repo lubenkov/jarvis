@@ -1,0 +1,111 @@
+{
+  "config": {
+    "chars": 600000,
+    "batch": 2,
+    "baseline": "none",
+    "tokenizer": "data/kaggle-run/corpus/tokenized/tokenizer.json"
+  },
+  "systems": {
+    "v1-sft": {
+      "web_ru": {
+        "bits_per_token": 4.3518219092488035,
+        "chars_per_token": 3.8097173189749323,
+        "bpc": 1.1422952268856876,
+        "ppl": 20.41873959312858,
+        "tokens": 157492,
+        "chars": 600000,
+        "seconds": 118.5
+      },
+      "texts_ru": {
+        "bits_per_token": 4.544730916973449,
+        "chars_per_token": 3.977803854491935,
+        "bpc": 1.14252262887254,
+        "ppl": 23.339971867039438,
+        "tokens": 150837,
+        "chars": 600000,
+        "seconds": 113.9
+      },
+      "chat_ru": {
+        "bits_per_token": 3.339052816799136,
+        "chars_per_token": 3.626341746446185,
+        "bpc": 0.9207772047605297,
+        "ppl": 10.119406801665209,
+        "tokens": 165456,
+        "chars": 600000,
+        "seconds": 124.4
+      }
+    },
+    "v2-pretrain": {
+      "web_ru": {
+        "bits_per_token": 4.202570983419095,
+        "chars_per_token": 4.1358203399644315,
+        "bpc": 1.0161396380809031,
+        "ppl": 18.41195585369236,
+        "tokens": 145074,
+        "chars": 600000,
+        "seconds": 133.9
+      },
+      "texts_ru": {
+        "bits_per_token": 4.196907431184014,
+        "chars_per_token": 4.139129954883484,
+        "bpc": 1.0139588456826205,
+        "ppl": 18.33981818122171,
+        "tokens": 144958,
+        "chars": 600000,
+        "seconds": 133.7
+      },
+      "chat_ru": {
+        "bits_per_token": 3.6240147230593336,
+        "chars_per_token": 3.992653517527749,
+        "bpc": 0.9076707275374406,
+        "ppl": 12.329263556273236,
+        "tokens": 150276,
+        "chars": 600000,
+        "seconds": 140.3
+      }
+    },
+    "v2-sft": {
+      "web_ru": {
+        "bits_per_token": 4.470973588964984,
+        "chars_per_token": 4.1358203399644315,
+        "bpc": 1.0810367040758435,
+        "ppl": 22.176712183509416,
+        "tokens": 145074,
+        "chars": 600000,
+        "seconds": 139.6
+      },
+      "texts_ru": {
+        "bits_per_token": 4.553471314233397,
+        "chars_per_token": 4.139129954883484,
+        "bpc": 1.1001034912810745,
+        "ppl": 23.48180352724371,
+        "tokens": 144958,
+        "chars": 600000,
+        "seconds": 142.8
+      },
+      "chat_ru": {
+        "bits_per_token": 3.496020135897047,
+        "chars_per_token": 3.992653517527749,
+        "bpc": 0.8756132032367744,
+        "ppl": 11.28254115478565,
+        "tokens": 150276,
+        "chars": 600000,
+        "seconds": 154.3
+      }
+    }
+  },
+  "compression": {
+    "web_ru": {
+      "gzip": 4.072333333333333,
+      "xz": 3.078666666666667
+    },
+    "texts_ru": {
+      "gzip": 4.194373333333333,
+      "xz": 3.02992
+    },
+    "chat_ru": {
+      "gzip": 3.572173333333333,
+      "xz": 2.6773333333333333
+    }
+  }
+}
