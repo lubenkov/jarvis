@@ -101,9 +101,11 @@ out3 = os.path.join(work, "stream")
 stats = {"read": 0, "written": 0, "filtered": 0}
 produced = build("web", iter(texts * 5), 3 * SHARD + 17, tokenizer, out3,
                  100, 200, stats)
+# build() writes the phase-mix source name, so the shards land under web_ru
 assert 0 < stats["written"] <= 512, "the stream should stop after the first batch"
-assert read_all(os.path.join(out3, "val", "web")) == expected[100:300], "stream val split is wrong"
-train_stream = read_all(os.path.join(out3, "train", "web"))
+assert read_all(os.path.join(out3, "val", "web_ru")) == expected[100:300], \
+    "stream val split is wrong"
+train_stream = read_all(os.path.join(out3, "train", "web_ru"))
 source = (expected * 5)[300:]
 assert train_stream == source[:len(train_stream)], "stream shards do not continue the stream"
 assert produced == len(train_stream) + 200 + 100, "token accounting does not match the shards"
