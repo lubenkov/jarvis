@@ -1,3 +1,5 @@
+import math
+
 import torch
 import torch.nn as nn
 
@@ -32,6 +34,13 @@ class TransformerLM(nn.Module):
         self.lm_head.weight = self.token_embedding.weight
 
         self.apply(_init_weights)
+        if cfg.depth_scaled_init:
+            # GPT-2 style: residual output projections shrink as 1/sqrt(2 * n_layers)
+            # so the residual stream does not grow with depth.
+            residual_std = 0.02 / math.sqrt(2 * cfg.n_layers)
+            for block in self.blocks:
+                nn.init.normal_(block.attn.out_proj.weight, mean=0.0, std=residual_std)
+                nn.init.normal_(block.ff.down.weight, mean=0.0, std=residual_std)
 
     def forward(self, idx, caches=None, use_cache=False):
         x = self.dropout(self.token_embedding(idx))

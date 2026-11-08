@@ -29,6 +29,25 @@ from model.transformer import TransformerLM
 
 _STOP = False
 VAL_BATCH = 8
+CE_CHUNK_POSITIONS = 4096
+
+
+def masked_ce(logits, targets, mask, chunk_positions=CE_CHUNK_POSITIONS):
+    """Weighted cross-entropy computed in slices over the batch.
+
+    With a 32k vocabulary a full 8x1024 micro-batch would need ~1 GB just for the
+    fp32 log-softmax buffer; slicing keeps the peak at ~128 MB for the same loss.
+    """
+    flat_logits = logits.reshape(-1, logits.shape[-1])
+    flat_targets = targets.reshape(-1)
+    flat_weights = mask.reshape(-1).float()
+    total = torch.zeros((), device=flat_logits.device, dtype=torch.float32)
+    for start in range(0, flat_logits.shape[0], chunk_positions):
+        stop = start + chunk_positions
+        losses = F.cross_entropy(flat_logits[start:stop], flat_targets[start:stop],
+                                 reduction="none")
+        total = total + (losses.float() * flat_weights[start:stop]).sum()
+    return total / flat_weights.sum().clamp_min(1.0)
 
 
 _PG_HAS_DEVICE_ID = "device_id" in inspect.signature(dist.init_process_group).parameters
@@ -323,9 +342,7 @@ def worker(rank, world_size, args, model_cfg, phase):
             x, y, mask = [t.to(device) for t in batch]
             with _autocast(use_cuda, amp_dtype):
                 logits = raw(x)
-                losses = F.cross_entropy(logits.view(-1, logits.shape[-1]), y.view(-1), reduction="none")
-            weights = mask.view(-1).float()
-            loss = ((losses * weights).sum() / weights.sum().clamp_min(1)).item()
+                loss = masked_ce(logits, y, mask).item()
             results[name] = round(loss, 4)
         raw.train()
         return results
@@ -335,7 +352,10 @@ def worker(rank, world_size, args, model_cfg, phase):
         lines = [f"# step {step}, {tokens_seen / 1e9:.3f}B tokens\n"]
         for item in golden:
             messages = item["messages"]
-            ids = build_prompt(tokenizer, messages)
+            system_prompt = next((m.get("content", "") for m in messages
+                                  if m.get("role") == "system"), "")
+            chat = [m for m in messages if m.get("role") != "system"]
+            ids = build_prompt(tokenizer, chat, system_prompt=system_prompt)
             out = generate_ids(raw, torch.tensor([ids], dtype=torch.long), max_new_tokens=96,
                                temperature=0.7, top_k=0, top_p=0.95, repetition_penalty=1.1,
                                stop_token_ids=stop_ids(tokenizer))
@@ -391,9 +411,7 @@ def worker(rank, world_size, args, model_cfg, phase):
             with no_sync:
                 with _autocast(use_cuda, amp_dtype):
                     logits = model(x)
-                    losses = F.cross_entropy(logits.view(-1, logits.shape[-1]), y.view(-1), reduction="none")
-                    weights = mask.view(-1).float()
-                    loss = (losses * weights).sum() / weights.sum().clamp_min(1.0)
+                    loss = masked_ce(logits, y, mask)
                 scaler.scale(loss / phase.grad_accum).backward()
             loss_accum += loss.item()
 
