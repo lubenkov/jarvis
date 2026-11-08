@@ -67,9 +67,9 @@ python - <<'PY'
 from huggingface_hub import snapshot_download
 
 snapshot_download(
-    repo_id="Eragon1/jarvis-112m",
-    local_dir="checkpoints/hf-jarvis-112m",
-    allow_patterns=["jarvis-112m-sft-fp16.pt", "tokenizer.json"],
+    repo_id="Eragon1/jarvis-138m",
+    local_dir="checkpoints/hf-jarvis-138m",
+    allow_patterns=["jarvis-138m-sft-fp16.pt", "tokenizer.json"],
 )
 PY
 ```
@@ -78,16 +78,16 @@ Start the interactive chat:
 
 ```bash
 python chat.py \
-  --ckpt checkpoints/hf-jarvis-112m/jarvis-112m-sft-fp16.pt \
-  --tokenizer checkpoints/hf-jarvis-112m/tokenizer.json
+  --ckpt checkpoints/hf-jarvis-138m/jarvis-138m-sft-fp16.pt \
+  --tokenizer checkpoints/hf-jarvis-138m/tokenizer.json
 ```
 
 Or generate a single completion:
 
 ```bash
 python generate.py \
-  --ckpt checkpoints/hf-jarvis-112m/jarvis-112m-sft-fp16.pt \
-  --tokenizer checkpoints/hf-jarvis-112m/tokenizer.json \
+  --ckpt checkpoints/hf-jarvis-138m/jarvis-138m-sft-fp16.pt \
+  --tokenizer checkpoints/hf-jarvis-138m/tokenizer.json \
   --prompt "Привет! Расскажи короткую историю."
 ```
 
@@ -210,30 +210,30 @@ It builds a synthetic corpus and exercises the model/KV cache, tokenizer, data p
 
 ## Limitations
 
-`jarvis` is an experimental 112M-parameter model, not a general-purpose assistant or a production-ready service. It can produce incorrect, repetitive, biased or unsafe text; its reasoning, factuality and safety have not been comprehensively evaluated. It is intended primarily for Russian, has a 768-token context window, and should not be used for medical, legal, financial or other high-stakes decisions. The public datasets have their own licenses and possible privacy/content issues; check their terms before use.
+`jarvis` is an experimental 138M-parameter model, not a general-purpose assistant or a production-ready service. It can produce incorrect, repetitive, biased or unsafe text; its reasoning, factuality and safety have not been comprehensively evaluated. It is intended primarily for Russian, has a 1024-token context window, and should not be used for medical, legal, financial or other high-stakes decisions. The public datasets have their own licenses and possible privacy/content issues; check their terms before use.
 
 ## License
 
-The source code is licensed under the Apache License 2.0 — see [LICENSE](LICENSE). Dataset terms remain those of their respective sources. The model card and checkpoint are published separately on [Hugging Face](https://huggingface.co/Eragon1/jarvis-112m).
+The source code is licensed under the Apache License 2.0 — see [LICENSE](LICENSE). Dataset terms remain those of their respective sources. The model card and checkpoint are published separately on [Hugging Face](https://huggingface.co/Eragon1/jarvis-138m).
 
 <details>
 <summary><b>🇷🇺 По-русски</b></summary>
 
 <br>
 
-`jarvis` — экспериментальная GPT-подобная авторегрессионная модель примерно на 112 млн параметров, ориентированная прежде всего на русский язык. В репозитории есть собственная byte-level BPE-токенизация, подготовка данных, обучение, оценка BPC, генерация с KV-cache, консольный чат и Telegram-бот.
+`jarvis` — экспериментальная GPT-подобная авторегрессионная модель примерно на 138 млн параметров, ориентированная прежде всего на русский язык. В репозитории есть собственная byte-level BPE-токенизация, подготовка данных, обучение, оценка BPC, генерация с KV-cache, консольный чат и Telegram-бот.
 
-**Запуск опубликованной модели:** установите зависимости из `requirements.txt`, скачайте `jarvis-112m-sft-fp16.pt` и `tokenizer.json` из [Eragon1/jarvis-112m](https://huggingface.co/Eragon1/jarvis-112m), затем выполните:
+**Запуск опубликованной модели:** установите зависимости из `requirements.txt`, скачайте `jarvis-138m-sft-fp16.pt` и `tokenizer.json` из [Eragon1/jarvis-138m](https://huggingface.co/Eragon1/jarvis-138m), затем выполните:
 
 ```bash
-python chat.py --ckpt checkpoints/hf-jarvis-112m/jarvis-112m-sft-fp16.pt \
-  --tokenizer checkpoints/hf-jarvis-112m/tokenizer.json
+python chat.py --ckpt checkpoints/hf-jarvis-138m/jarvis-138m-sft-fp16.pt \
+  --tokenizer checkpoints/hf-jarvis-138m/tokenizer.json
 ```
 
-**Обучение:** `python prepare_data.py --what all` → `python train_tokenizer.py` →
-`python tokenize_corpus.py --source all` → `python train.py --phase pretrain` →
-`python train.py --phase sft --resume checkpoints/pretrain/latest.pt`.
+**Обучение:** `python prepare_data.py --what web` и `--what chats` → `python train_tokenizer.py` →
+`python prepare_stream.py --source web/wiki/texts` → `python tokenize_corpus.py --source chat_ru` →
+`python train.py --phase pretrain` → `python train.py --phase sft --resume checkpoints/pretrain/latest.pt`.
 
-В настройках обучения заложено 1,2 млрд токенов для pretrain и 150 млн для SFT.
+В настройках обучения заложено 3,2 млрд токенов для pretrain и 200 млн для SFT.
 
 </details>
