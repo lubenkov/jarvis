@@ -2,7 +2,6 @@
 
 A 138M-parameter GPT-style language model for Russian, implemented from scratch in PyTorch — with a custom BPE tokenizer, a two-stage training pipeline and local inference.
 
-![Status](https://img.shields.io/badge/status-work%20in%20progress-yellow?style=flat-square)
 ![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?style=flat-square&logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.4%2B-EE4C2C?style=flat-square&logo=pytorch&logoColor=white)
 [![Hugging Face model](https://img.shields.io/badge/Hugging%20Face-jarvis--138m-yellow?style=flat-square&logo=huggingface)](https://huggingface.co/Eragon1/jarvis-138m)
