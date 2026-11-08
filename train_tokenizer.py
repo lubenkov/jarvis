@@ -103,7 +103,7 @@ def main():
 
     tokenizer.save(args.out)
     print("Tokenizer saved to", args.out)
-    check_tokenizer(tokenizer)
+    check_tokenizer(tokenizer, required=SPECIAL_TOKENS)
 
     demo = [
         {"role": "user", "content": "Привет! Как дела?"},

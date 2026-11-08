@@ -8,7 +8,8 @@ import shutil
 import numpy as np
 from tokenizers import Tokenizer
 
-from chat_format import check_tokenizer, conversation_mask, format_conversation, prepare_messages
+from chat_format import (SPECIAL_TOKENS, check_tokenizer, conversation_mask, format_conversation,
+                         prepare_messages)
 from model.config import (CORPUS_DIR, SYSTEM_PROMPTS_FILE, TOKENIZED_DIR, TOKENIZER_PATH,
                           VAL_SKIP_TOKENS, VAL_TOKENS_PER_SOURCE)
 
@@ -185,7 +186,9 @@ def main():
     args = parser.parse_args()
 
     tokenizer = Tokenizer.from_file(args.tokenizer)
-    check_tokenizer(tokenizer)
+    system_prompts = load_system_prompts(args.system_prompts)
+    # only a tokenizer with <|system|> can carry the injected prompts
+    check_tokenizer(tokenizer, required=SPECIAL_TOKENS if system_prompts else None)
     system_prompts = load_system_prompts(args.system_prompts)
     if system_prompts:
         print(f"System prompts: {len(system_prompts)} from {args.system_prompts}, "

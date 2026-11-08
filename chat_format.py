@@ -7,6 +7,8 @@ USER_TOKEN = "<|user|>"
 ASSISTANT_TOKEN = "<|assistant|>"
 PAD_TOKEN = "<|pad|>"
 SPECIAL_TOKENS = [EOS_TOKEN, SYSTEM_TOKEN, USER_TOKEN, ASSISTANT_TOKEN, PAD_TOKEN]
+# every tokenizer ever shipped carries these; <|system|> appeared in v2 only
+BASE_TOKENS = [EOS_TOKEN, USER_TOKEN, ASSISTANT_TOKEN, PAD_TOKEN]
 
 
 ROLE_ALIASES = {
@@ -19,10 +21,12 @@ ROLE_ALIASES = {
 def check_tokenizer(tokenizer, verbose=True, required=None):
     """Verify the special tokens this tokenizer is expected to carry.
 
-    Older (v1) tokenizers have no <|system|>, so benchmark tools can pass a
-    narrower ``required`` list instead of rebuilding the checkpoint's tokenizer.
+    The default set is the one every checkpoint carries. Tools that genuinely
+    need the v2 system token (tokenizer training, corpus tokenization) pass
+    ``required=SPECIAL_TOKENS`` explicitly, so a v1 tokenizer still works for
+    plain inference.
     """
-    required = SPECIAL_TOKENS if required is None else required
+    required = BASE_TOKENS if required is None else required
     missing = [t for t in required if tokenizer.token_to_id(t) is None]
     if missing:
         raise ValueError(
@@ -30,7 +34,8 @@ def check_tokenizer(tokenizer, verbose=True, required=None):
             "Rebuild the tokenizer: python train_tokenizer.py"
         )
     if verbose:
-        print(f"Tokenizer: {tokenizer.get_vocab_size()} tokens, special tokens OK")
+        note = "" if tokenizer.token_to_id(SYSTEM_TOKEN) is not None else " (v1: no <|system|>)"
+        print(f"Tokenizer: {tokenizer.get_vocab_size()} tokens, special tokens OK{note}")
     return tokenizer
 
 
@@ -121,8 +126,15 @@ def conversation_mask(ids: List[int], tokenizer) -> List[int]:
     return mask
 
 
+def supports_system(tokenizer) -> bool:
+    return tokenizer.token_to_id(SYSTEM_TOKEN) is not None
+
+
 def encode_conversation(tokenizer, messages: List[dict], add_eos=True,
                         min_messages: int = 2, system_prompt: str = "") -> Tuple[List[int], List[int]]:
+    if system_prompt and not supports_system(tokenizer):
+        # a v1 tokenizer has no <|system|>; a system prompt would be plain text
+        system_prompt = ""
     if system_prompt:
         messages = [{"role": "system", "content": system_prompt}] + list(messages or [])
     prepared = prepare_messages(messages, min_messages=min_messages, keep_system=bool(system_prompt))
