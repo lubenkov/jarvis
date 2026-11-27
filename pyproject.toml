@@ -36,6 +36,17 @@ dev = [
     "ruff>=0.6",
 ]
 
+[project.scripts]
+jarvis-chat = "jarvis.chat:main"
+jarvis-generate = "jarvis.generate:main"
+jarvis-train = "jarvis.train:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"
@@ -44,6 +55,14 @@ extend-exclude = ["venv", ".venv", "data", "checkpoints", ".hf-cache", "results"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"model/*.py" = ["E402", "F403"]
+"chat_format.py" = ["E402", "F403"]
+"dataset.py" = ["E402", "F403"]
+"generate.py" = ["E402", "F403"]
+"chat.py" = ["E402"]
+"train.py" = ["E402"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
