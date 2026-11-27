@@ -6,16 +6,31 @@ class RoPE(nn.Module):
     def __init__(self, head_dim, theta=10000.0, max_seq_len=4096):
         super().__init__()
         assert head_dim % 2 == 0
+        self.head_dim = head_dim
+        self.theta = theta
 
-        inv_freq = 1.0 / (theta ** (torch.arange(0, head_dim, 2).float() / head_dim))
-        positions = torch.arange(max_seq_len).float()
+        self.register_buffer("cos_cached", torch.empty(0), persistent=False)
+        self.register_buffer("sin_cached", torch.empty(0), persistent=False)
+        self._build_cache(max_seq_len)
+
+    def _build_cache(self, seq_len):
+        device = self.cos_cached.device
+        inv_freq = 1.0 / (self.theta ** (
+            torch.arange(0, self.head_dim, 2, device=device, dtype=torch.float32) / self.head_dim))
+        positions = torch.arange(seq_len, device=device, dtype=torch.float32)
         freqs = torch.outer(positions, inv_freq)
+        self.cos_cached = freqs.cos()
+        self.sin_cached = freqs.sin()
 
-        self.register_buffer("cos_cached", freqs.cos(), persistent=False)
-        self.register_buffer("sin_cached", freqs.sin(), persistent=False)
+    def _ensure_cache(self, seq_len):
+        cached = self.cos_cached.shape[0]
+        if seq_len <= cached:
+            return
+        self._build_cache(max(seq_len, cached * 2))
 
     def rotate(self, q, k, offset=0):
         seq_len = q.shape[2]
+        self._ensure_cache(offset + seq_len)
         cos = self.cos_cached[offset:offset + seq_len].to(q.dtype)[None, None]
         sin = self.sin_cached[offset:offset + seq_len].to(q.dtype)[None, None]
 
