@@ -2,7 +2,8 @@
 
 A 138M-parameter GPT-style language model for Russian, implemented from scratch in PyTorch — with a custom BPE tokenizer, a two-stage training pipeline and local inference.
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?style=flat-square&logo=python&logoColor=white)
+[![CI](https://github.com/lubenkov/jarvis/actions/workflows/ci.yml/badge.svg)](https://github.com/lubenkov/jarvis/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.4%2B-EE4C2C?style=flat-square&logo=pytorch&logoColor=white)
 [![Hugging Face model](https://img.shields.io/badge/Hugging%20Face-jarvis--138m-yellow?style=flat-square&logo=huggingface)](https://huggingface.co/Eragon1/jarvis-138m)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache_2.0-3DA639?style=flat-square)](LICENSE)
@@ -43,6 +44,13 @@ The default `main` preset is configured as follows:
 
 Chat examples use the special tokens `<|system|>`, `<|user|>`, `<|assistant|>` and `<|endoftext|>`; `<|pad|>` is also reserved by the tokenizer. For dialogue SFT, the loss is applied to assistant responses rather than user messages. The system prompt is optional and never hardcoded: it comes from `--system` or `JARVIS_SYSTEM_PROMPT`, and about half of the training dialogues carry it, so the model works both with and without it.
 
+## Architecture & Engineering Decisions
+
+- **Streaming `uint16` shards instead of a raw corpus dump.** The v2 corpus is 4B+ tokens, roughly 36 GB as JSONL against a 20 GB disk budget. `prepare_stream.py` filters, deduplicates and tokenizes Hugging Face streams in one pass and writes only the final shards at 2 bytes per token. No intermediate corpus is persisted, so the pipeline is bounded by the target token count rather than by free disk.
+- **Byte-level BPE with NFC normalization and digit splitting.** NFC makes visually identical Cyrillic text byte-identical before merges are learned, so vocabulary slots are not spent on encoding variants. `Digits(individual_digits=True)` splits every number into single characters, which stops the merge table from memorising arbitrary numbers and keeps the vocabulary small.
+- **Modern decoder-only block.** RoPE encodes positions relative to a query/key pair, RMSNorm needs one learned vector per layer instead of mean-centering, SwiGLU adds a gated feed-forward path at a comparable parameter budget, and input/output embeddings are tied. Residual output projections use a depth-scaled initialisation of `0.02 / sqrt(2 * n_layers)` so activation variance does not grow with depth. SFT applies an assistant-only loss mask: user turns and special tokens are context, not prediction targets.
+- **Bits-per-character (BPC) on held-out text, not raw perplexity.** Perplexity is defined per token and depends on the tokenizer and its merge table, so checkpoints with different tokenizers cannot be compared by perplexity. BPC converts the same cross-entropy to bits and divides by characters, which is vocabulary-independent and directly comparable to the gzip and xz baselines in the evaluation table.
+
 ## Get started
 
 ### Run the published checkpoint
@@ -55,9 +63,11 @@ cd jarvis
 python -m venv .venv
 # Activate the virtual environment for your shell, then:
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -e .
 python -m pip install --upgrade huggingface_hub
 ```
+
+The project is packaged with `pyproject.toml`, so `pip install -e .` installs the runtime dependencies and the `jarvis-chat`, `jarvis-generate` and `jarvis-train` console entrypoints. The root-level commands below keep working unchanged. Optional extras are available as `.[bot]`, `.[bench]` and `.[dev]`.
 
 Download the checkpoint and its matching tokenizer from Hugging Face:
 
@@ -180,6 +190,20 @@ All systems score the same 600,000-character held-out sample of each source with
 
 ## Tests
 
+Install the development extras once:
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+Run the unit suite:
+
+```bash
+pytest -v
+```
+
+The tests are CPU-only, deterministic and download-free. They cover the numerical model invariants (RMSNorm, SwiGLU, RoPE cache growth, causal masking, KV-cache equivalence and depth-scaled initialisation), the assistant-only SFT mask, the sampling options and the shard dataset/router.
+
 Run the end-to-end smoke test with the project dependencies installed:
 
 ```bash
@@ -194,17 +218,21 @@ It builds a synthetic corpus and exercises the model/KV cache, tokenizer, data p
 
 | File / directory | Responsibility |
 | :-- | :-- |
-| `model/` | Transformer configuration, attention, RoPE, RMSNorm, SwiGLU blocks and model |
+| `src/jarvis/model/` | Transformer configuration, attention, RoPE, RMSNorm, SwiGLU blocks and model |
+| `src/jarvis/chat_format.py` | Chat markup, special tokens and assistant-only loss masks |
+| `src/jarvis/dataset.py` | Stream token windows and assistant-response masks |
+| `src/jarvis/train.py`, `src/jarvis/generate.py`, `src/jarvis/chat.py` | Training loop, sampling and interactive chat CLIs |
+| `model/`, `chat_format.py`, `dataset.py`, `generate.py`, `chat.py`, `train.py` | Backward-compatible shims for the root-level imports and commands |
 | `prepare_data.py` | Download, filter, normalize and deduplicate source corpora |
 | `prepare_stream.py` | Stream, filter and tokenize web/wiki/news in one pass (no JSONL dump) |
 | `train_tokenizer.py` | Train the byte-level BPE tokenizer |
 | `tokenize_corpus.py` | Encode corpora and write train/validation shards |
-| `dataset.py` | Stream token windows and assistant-response masks |
-| `train.py` | Pretraining/SFT loop, validation, checkpoints, AMP and DDP |
-| `chat.py`, `generate.py` | Interactive chat and one-shot generation |
 | `bot.py` | Optional Telegram integration |
 | `tools/bench_bpc.py`, `tools/compare.py` | BPC evaluation and checkpoint sample comparison |
+| `tests/` | Fast CPU unit tests for the model, chat format, sampling and dataset |
 | `selftest.py` | Synthetic end-to-end smoke test |
+| `pyproject.toml` | Packaging, dependency extras, console entrypoints, ruff and pytest config |
+| `.github/workflows/ci.yml` | Lint, unit tests, pipeline check and end-to-end selftest |
 | `results/` | Committed BPC results |
 
 ## Limitations
