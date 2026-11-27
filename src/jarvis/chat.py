@@ -3,11 +3,16 @@ import argparse
 import torch
 from tokenizers import Tokenizer
 
-from jarvis.chat_format import (build_prompt, check_tokenizer, decode_ids, resolve_system_prompt,
-                                stop_ids, truncate_messages)
+from jarvis.chat_format import (
+    build_prompt,
+    check_tokenizer,
+    decode_ids,
+    resolve_system_prompt,
+    stop_ids,
+    truncate_messages,
+)
 from jarvis.generate import generate_ids, load_model
-from jarvis.model.config import (MAX_NEW_TOKENS, REPETITION_PENALTY, TEMPERATURE, TOKENIZER_PATH,
-                                 TOP_K, TOP_P)
+from jarvis.model.config import MAX_NEW_TOKENS, REPETITION_PENALTY, TEMPERATURE, TOKENIZER_PATH, TOP_K, TOP_P
 
 MAX_HISTORY_MESSAGES = 16
 
@@ -74,7 +79,7 @@ def main():
 
         printed = {"n": 0}
 
-        def show(full_ids):
+        def show(full_ids, ids=ids, printed=printed):
             text = decode_ids(tokenizer, full_ids[0].tolist()[len(ids):])
             if len(text) > printed["n"]:
                 print(text[printed["n"]:], end="", flush=True)

@@ -7,8 +7,7 @@ import time
 import torch
 from tokenizers import Tokenizer
 
-from chat_format import (build_prompt, check_tokenizer, decode_ids, resolve_system_prompt,
-                         stop_ids, truncate_messages)
+from chat_format import build_prompt, check_tokenizer, decode_ids, resolve_system_prompt, stop_ids, truncate_messages
 from generate import generate_ids, load_model
 from model.config import REPETITION_PENALTY, TEMPERATURE, TOKENIZER_PATH, TOP_K, TOP_P
 
@@ -177,9 +176,8 @@ def build_handlers(jarvis):
             return
         state["last"] = time.time()
         await context.bot.send_chat_action(chat_id, ChatAction.TYPING)
-        async with state["lock"]:
-            async with jarvis.sem:
-                reply = await asyncio.to_thread(jarvis.generate, chat_id, update.message.text, state)
+        async with state["lock"], jarvis.sem:
+            reply = await asyncio.to_thread(jarvis.generate, chat_id, update.message.text, state)
         await update.message.reply_text(reply)
 
     return [CommandHandler("start", start), CommandHandler("help", start),

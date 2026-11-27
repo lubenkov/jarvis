@@ -22,9 +22,20 @@ from torch.utils.data import DataLoader
 from jarvis.chat_format import build_prompt, check_tokenizer, decode_ids, stop_ids
 from jarvis.dataset import TokenStreamDataset, collate_batch, load_val_batches
 from jarvis.generate import generate_ids
-from jarvis.model.config import (CHECKPOINT_DIR, CKPT_MINUTES, LOG_EVERY_STEPS, MODEL_PRESETS,
-                                 NUM_WORKERS, PHASES, SAMPLE_EVERY_STEPS, SAMPLE_FIRST_STEPS,
-                                 SESSION_HOURS, TOKENIZED_DIR, TOKENIZER_PATH, VAL_EVERY_STEPS)
+from jarvis.model.config import (
+    CHECKPOINT_DIR,
+    CKPT_MINUTES,
+    LOG_EVERY_STEPS,
+    MODEL_PRESETS,
+    NUM_WORKERS,
+    PHASES,
+    SAMPLE_EVERY_STEPS,
+    SAMPLE_FIRST_STEPS,
+    SESSION_HOURS,
+    TOKENIZED_DIR,
+    TOKENIZER_PATH,
+    VAL_EVERY_STEPS,
+)
 from jarvis.model.transformer import TransformerLM
 
 _STOP = False
@@ -237,10 +248,7 @@ def worker(rank, world_size, args, model_cfg, phase):
         total_seconds = state.get("total_seconds", 0.0)
         best_val = state.get("best_val", float("inf"))
         saved_phase = state.get("phase", phase.name)
-        if saved_phase == phase.name:
-            phase_tokens = state.get("phase_tokens", tokens_seen)
-        else:
-            phase_tokens = 0
+        phase_tokens = state.get("phase_tokens", tokens_seen) if saved_phase == phase.name else 0
         if is_main:
             print(f"Resuming from {resume_path}: step {step}, {tokens_seen / 1e9:.3f}B tokens "
                   f"({phase.name}: {phase_tokens / 1e6:.0f}M)")
@@ -271,7 +279,8 @@ def worker(rank, world_size, args, model_cfg, phase):
         if tokens < warmup_tokens:
             return phase.peak_lr * max(tokens, 1) / warmup_tokens
         progress = min(1.0, (tokens - warmup_tokens) / max(1, phase.total_tokens - warmup_tokens))
-        return phase.peak_lr * (phase.min_lr_ratio + (1 - phase.min_lr_ratio) * 0.5 * (1 + math.cos(math.pi * progress)))
+        return phase.peak_lr * (
+            phase.min_lr_ratio + (1 - phase.min_lr_ratio) * 0.5 * (1 + math.cos(math.pi * progress)))
 
     if is_main:
         planned_steps = max(1, math.ceil((phase.total_tokens - phase_tokens) / tokens_per_step))

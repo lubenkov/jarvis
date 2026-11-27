@@ -8,10 +8,15 @@ import shutil
 import numpy as np
 from tokenizers import Tokenizer
 
-from chat_format import (SPECIAL_TOKENS, check_tokenizer, conversation_mask, format_conversation,
-                         prepare_messages)
-from model.config import (CORPUS_DIR, SYSTEM_PROMPTS_FILE, TOKENIZED_DIR, TOKENIZER_PATH,
-                          VAL_SKIP_TOKENS, VAL_TOKENS_PER_SOURCE)
+from chat_format import SPECIAL_TOKENS, check_tokenizer, conversation_mask, format_conversation, prepare_messages
+from model.config import (
+    CORPUS_DIR,
+    SYSTEM_PROMPTS_FILE,
+    TOKENIZED_DIR,
+    TOKENIZER_PATH,
+    VAL_SKIP_TOKENS,
+    VAL_TOKENS_PER_SOURCE,
+)
 
 SHARD_TOKENS = 25_000_000
 ENCODE_BATCH = 512
@@ -98,7 +103,7 @@ def pick_system(text, prompts, probability, seed):
     """Deterministic per-document choice, so re-tokenizing gives identical shards."""
     if not prompts or probability <= 0:
         return ""
-    digest = hashlib.md5(f"{seed}:{text[:500]}".encode("utf-8")).digest()
+    digest = hashlib.md5(f"{seed}:{text[:500]}".encode()).digest()
     value = int.from_bytes(digest[:4], "big")
     if value % 1000 >= int(probability * 1000):
         return ""

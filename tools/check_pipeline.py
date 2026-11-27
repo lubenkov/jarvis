@@ -17,6 +17,7 @@ import numpy as np
 from tokenizers import Tokenizer
 
 import tokenize_corpus
+from prepare_stream import build
 from tokenize_corpus import Router, ShardWriter
 from train_tokenizer import build_tokenizer, iter_texts
 
@@ -26,7 +27,10 @@ tokenize_corpus.SHARD_TOKENS = SHARD
 work = tempfile.mkdtemp(prefix="jarvis_shards_")
 corpus = os.path.join(work, "corpus")
 os.makedirs(corpus)
-words = "джарвис привет как дела сегодня погода хорошая хочу расскажи шутку спасибо друг".split()
+words = [
+    "джарвис", "привет", "как", "дела", "сегодня", "погода", "хорошая",
+    "хочу", "расскажи", "шутку", "спасибо", "друг",
+]
 
 with open(os.path.join(corpus, "web_ru.jsonl"), "w", encoding="utf-8") as f:
     for i in range(3000):
@@ -95,8 +99,6 @@ print(f"router: val {len(val_ids)} tokens at the right offset, train {len(train_
       f"skipped 137")
 
 # --- 3. prepare_stream.build: target stops the stream, val split works ---
-from prepare_stream import build
-
 out3 = os.path.join(work, "stream")
 stats = {"read": 0, "written": 0, "filtered": 0}
 produced = build("web", iter(texts * 5), 3 * SHARD + 17, tokenizer, out3,

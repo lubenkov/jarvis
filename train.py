@@ -7,6 +7,5 @@ if _SRC not in sys.path:
 
 from jarvis.train import main
 
-
 if __name__ == "__main__":
     main()

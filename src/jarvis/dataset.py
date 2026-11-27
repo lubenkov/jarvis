@@ -11,7 +11,7 @@ class TokenStreamDataset(IterableDataset):
         super().__init__()
         self.seq_len = seq_len
         self.sources = []
-        for name, weight, use_mask in mix:
+        for name, _weight, use_mask in mix:
             shards = sorted(glob.glob(os.path.join(data_dir, name, "shard_*.bin")))
             shards = [s for s in shards if not s.endswith(".mask.bin")]
             if not shards:
@@ -68,7 +68,7 @@ class TokenStreamDataset(IterableDataset):
 
 
 def collate_batch(batch):
-    xs, ys, masks = zip(*batch)
+    xs, ys, masks = zip(*batch, strict=True)
     return torch.stack(xs), torch.stack(ys), torch.stack(masks)
 
 

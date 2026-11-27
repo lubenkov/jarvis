@@ -1,5 +1,4 @@
 import os
-from typing import Dict, List, Optional, Tuple
 
 EOS_TOKEN = "<|endoftext|>"
 SYSTEM_TOKEN = "<|system|>"
@@ -39,27 +38,27 @@ def check_tokenizer(tokenizer, verbose=True, required=None):
     return tokenizer
 
 
-def special_ids(tokenizer) -> Dict[str, int]:
+def special_ids(tokenizer) -> dict[str, int]:
     check_tokenizer(tokenizer, verbose=False)
     return {name: tokenizer.token_to_id(tok) for name, tok in (
         ("eos", EOS_TOKEN), ("system", SYSTEM_TOKEN), ("user", USER_TOKEN),
         ("assistant", ASSISTANT_TOKEN), ("pad", PAD_TOKEN))}
 
 
-def normalize_role(role) -> Optional[str]:
+def normalize_role(role) -> str | None:
     return ROLE_ALIASES.get(str(role).strip().lower())
 
 
-def prepare_messages(messages: List[dict], min_messages: int = 2,
-                     keep_system: bool = False) -> List[Tuple[str, str]]:
+def prepare_messages(messages: list[dict], min_messages: int = 2,
+                     keep_system: bool = False) -> list[tuple[str, str]]:
     """Normalize a raw message list into (role, content) pairs.
 
     With keep_system=False (default, v1 behaviour) system prompts are merged into
     the first user turn. With keep_system=True they stay a separate first turn and
     are rendered as a <|system|> segment.
     """
-    out: List[Tuple[str, str]] = []
-    system_prefix: List[str] = []
+    out: list[tuple[str, str]] = []
+    system_prefix: list[str] = []
 
     for m in messages or []:
         if not isinstance(m, dict):
@@ -93,7 +92,7 @@ def prepare_messages(messages: List[dict], min_messages: int = 2,
     return out
 
 
-def format_conversation(messages: List[Tuple[str, str]], add_eos=True) -> str:
+def format_conversation(messages: list[tuple[str, str]], add_eos=True) -> str:
     parts = []
     for role, content in messages:
         if role == "system":
@@ -107,7 +106,7 @@ def format_conversation(messages: List[Tuple[str, str]], add_eos=True) -> str:
     return "".join(parts)
 
 
-def conversation_mask(ids: List[int], tokenizer) -> List[int]:
+def conversation_mask(ids: list[int], tokenizer) -> list[int]:
     ids_map = special_ids(tokenizer)
     all_special = set(ids_map.values())
     mask = [0] * len(ids)
@@ -130,8 +129,8 @@ def supports_system(tokenizer) -> bool:
     return tokenizer.token_to_id(SYSTEM_TOKEN) is not None
 
 
-def encode_conversation(tokenizer, messages: List[dict], add_eos=True,
-                        min_messages: int = 2, system_prompt: str = "") -> Tuple[List[int], List[int]]:
+def encode_conversation(tokenizer, messages: list[dict], add_eos=True,
+                        min_messages: int = 2, system_prompt: str = "") -> tuple[list[int], list[int]]:
     if system_prompt and not supports_system(tokenizer):
         # a v1 tokenizer has no <|system|>; a system prompt would be plain text
         system_prompt = ""
@@ -145,14 +144,14 @@ def encode_conversation(tokenizer, messages: List[dict], add_eos=True,
     return ids, conversation_mask(ids, tokenizer)
 
 
-def build_prompt(tokenizer, messages: List[dict], system_prompt: str = "") -> List[int]:
+def build_prompt(tokenizer, messages: list[dict], system_prompt: str = "") -> list[int]:
     ids, _ = encode_conversation(tokenizer, messages, add_eos=True, min_messages=1,
                                  system_prompt=system_prompt)
     ids.append(tokenizer.token_to_id(ASSISTANT_TOKEN))
     return ids
 
 
-def truncate_messages(tokenizer, messages: List[dict], max_tokens: int) -> List[dict]:
+def truncate_messages(tokenizer, messages: list[dict], max_tokens: int) -> list[dict]:
     messages = list(messages)
     while len(messages) > 1:
         if len(build_prompt(tokenizer, messages)) <= max_tokens:
@@ -178,11 +177,11 @@ def truncate_messages(tokenizer, messages: List[dict], max_tokens: int) -> List[
     return messages
 
 
-def decode_ids(tokenizer, ids: List[int]) -> str:
+def decode_ids(tokenizer, ids: list[int]) -> str:
     return tokenizer.decode(ids, skip_special_tokens=True)
 
 
-def stop_ids(tokenizer) -> List[int]:
+def stop_ids(tokenizer) -> list[int]:
     ids_map = special_ids(tokenizer)
     return [ids_map["eos"], ids_map["user"]]
 

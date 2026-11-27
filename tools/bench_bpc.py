@@ -49,7 +49,7 @@ def window_batches(ids, ctx, batch):
         chunk_x, chunk_y = xs[i:i + batch], ys[i:i + batch]
         width = max(len(x) for x in chunk_x)
         padded_x, padded_y, mask = [], [], []
-        for x, y in zip(chunk_x, chunk_y):
+        for x, y in zip(chunk_x, chunk_y, strict=True):
             pad = width - len(x)
             padded_x.append(np.concatenate([x, np.zeros(pad, dtype=np.int64)]))
             padded_y.append(np.concatenate([y, np.zeros(pad, dtype=np.int64)]))

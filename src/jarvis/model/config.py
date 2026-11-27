@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import List, Tuple
 
 
 @dataclass
@@ -29,7 +28,7 @@ MODEL_PRESETS = {
 @dataclass
 class PhaseConfig:
     name: str
-    mix: List[Tuple[str, float, bool]]
+    mix: list[tuple[str, float, bool]]
     total_tokens: int
     peak_lr: float
     min_lr_ratio: float

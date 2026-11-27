@@ -7,7 +7,6 @@ if _SRC not in sys.path:
 
 from jarvis.dataset import *
 
-
 if __name__ == "__main__":
     from jarvis.dataset import main
 

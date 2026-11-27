@@ -11,7 +11,7 @@ from tokenizers import Tokenizer
 
 from chat_format import build_prompt, check_tokenizer, decode_ids, stop_ids
 from generate import generate_ids, load_model
-from model.config import (MAX_NEW_TOKENS, REPETITION_PENALTY, TEMPERATURE, TOKENIZER_PATH, TOP_K, TOP_P)
+from model.config import MAX_NEW_TOKENS, REPETITION_PENALTY, TEMPERATURE, TOKENIZER_PATH, TOP_K, TOP_P
 
 
 def short_name(path):

@@ -4,10 +4,17 @@ import torch
 import torch.nn.functional as F
 from tokenizers import Tokenizer
 
-from jarvis.chat_format import (build_prompt, check_tokenizer, decode_ids, resolve_system_prompt,
-                                stop_ids)
-from jarvis.model.config import (MAX_NEW_TOKENS, MODEL_PRESETS, ModelConfig, REPETITION_PENALTY,
-                                 TEMPERATURE, TOKENIZER_PATH, TOP_K, TOP_P)
+from jarvis.chat_format import build_prompt, check_tokenizer, decode_ids, resolve_system_prompt, stop_ids
+from jarvis.model.config import (
+    MAX_NEW_TOKENS,
+    MODEL_PRESETS,
+    REPETITION_PENALTY,
+    TEMPERATURE,
+    TOKENIZER_PATH,
+    TOP_K,
+    TOP_P,
+    ModelConfig,
+)
 from jarvis.model.transformer import TransformerLM
 
 
